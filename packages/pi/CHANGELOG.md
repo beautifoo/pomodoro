@@ -1,5 +1,14 @@
 # @beautifoo/pi-pomodoro
 
+## 0.2.2
+
+### Patch Changes
+
+- e07c73b: While a settings file that doesn't fit keeps the timer off, `/pomodoro` now says why, as the session's start does, instead of listing today's check-ins.
+- 0f7ae24: A `/reload`, `/resume` or `pi --continue` no longer brings the same pomodoro's check-in again: the extension keeps the check-in it gave in an entry of the session, and reads it back when the session starts.
+- 5feaa0b: The notice at a check-in reads "told the agent your pomodoro is up", in the Pomodoro Technique's word, not "your work block".
+- fb8ad90: A `pomodoro-settings.json` that can't be read (its permissions, or a folder at that path) now keeps the timer off, with an error at session start, as a broken one does. Pi used to run on the defaults without a word. Only a missing file means the defaults.
+
 ## 0.2.1
 
 ### Patch Changes
