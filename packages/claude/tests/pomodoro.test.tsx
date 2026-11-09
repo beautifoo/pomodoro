@@ -31,6 +31,8 @@ const world = (
 	const status: (string | undefined)[] = []
 	const labels: string[] = []
 	const chimes: number[] = []
+	// Without an answer the kit skips the whole session.start hook.
+	on('settings.read', () => ({ value: {} }))
 	on('session.start', (_, e) => ({ cwd: e.cwd }))
 	on('prompt.submit', (_, e) => ({ text: e.text }))
 	on('tool.call', () => ({ result: {} }))
@@ -79,6 +81,17 @@ const world = (
 			notified.push(text)
 			viaOsascript.push(text)
 		}
+		// The Mac's languages: none.
+		if (e.argv[0] === 'defaults')
+			return {
+				value: {
+					exitCode: 0,
+					stdout: '',
+					stderr: '',
+					isStdoutTruncated: false,
+					isStderrTruncated: false,
+				},
+			}
 		const ms = idle(clock.now())
 		return {
 			value: {

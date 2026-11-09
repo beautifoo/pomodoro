@@ -8,6 +8,12 @@ import {
 	type Settings,
 	settingsFrom,
 } from './core'
+import {
+	APPLE_LANGUAGES,
+	type Language,
+	languageFrom,
+	messages,
+} from './messages'
 
 // What core keeps across a reload, in $.state: a reload (a /config change) starts the module over, not the session.
 // The key is named for what it holds, the number 0.6.1 kept there too, so an update doesn't repeat a check-in.
@@ -16,6 +22,8 @@ const LABEL = { plugin: 'pomodoro', key: 'label' } as const
 
 // This session's instance of core (lib/core), from its start.
 let instance: Instance | undefined
+// The person's language, read at the session's start.
+let language: Language = 'en'
 
 // Claude Code's side of core: the engine's clock, store, processes and UI, through the session's start's `$`.
 function host($: EngineInterface): Host {
@@ -82,7 +90,7 @@ async function begin(
 	// Like ioreg, the watcher sees the console's input, not the input of an SSH session.
 	const remote = Boolean(await $.env.get('SSH_CONNECTION'))
 	if (instance !== undefined) return
-	instance = createInstance(host($), { settings, remote, kept })
+	instance = createInstance(host($), { settings, remote, kept, language })
 	if (isInteractive) instance.start()
 }
 
@@ -93,8 +101,20 @@ export const register: Register = (on, options) => {
 	if ('problems' in read) throw new Error(read.problems.join('; '))
 	const settings = read
 	on('session.start', async ($, e, next) => {
+		// A rejected `$` call here makes Claude Code skip the hook, so each read falls back on its own.
+		const setting = await $.settings
+			.read({ key: 'language' })
+			.catch(() => undefined)
+		const mac = await $.process
+			.run([...APPLE_LANGUAGES], { cwd: '/', timeoutMs: 5_000 })
+			.catch(() => ({ stdout: '' }))
+		language = languageFrom(setting, mac.stdout)
 		await $.command
-			.register({ ...COMMAND, argumentHint: 'today' })
+			.register({
+				...COMMAND,
+				description: messages[language].description,
+				argumentHint: 'today',
+			})
 			.catch(() => {})
 		await begin($, settings, e.isInteractive)
 		return next(e)
@@ -129,7 +149,7 @@ export const register: Register = (on, options) => {
 					content: [
 						{
 							type: 'text',
-							text: notice(settings),
+							text: notice(settings, language),
 						},
 					],
 				},

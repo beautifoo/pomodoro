@@ -15,7 +15,8 @@
 	"type": "module",
 	"files": [
 		"index.ts",
-		"core.ts"
+		"core.ts",
+		"messages.ts"
 	],
 	"pi": {
 		"extensions": [
@@ -23,7 +24,7 @@
 		]
 	},
 	"scripts": {
-		"build": "cp ../../lib/core/index.ts core.ts",
+		"build": "cp ../../lib/core/index.ts core.ts && cp ../../lib/core/messages.ts messages.ts",
 		"prepack": "npm run build"
 	},
 	"peerDependencies": {

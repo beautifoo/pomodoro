@@ -192,6 +192,7 @@ function start(
 	const pomodoro = createInstance(w.host, {
 		settings: { ...DEFAULTS, ...settings },
 		remote: false,
+		language: 'en',
 		...options,
 	})
 	pomodoro.start()

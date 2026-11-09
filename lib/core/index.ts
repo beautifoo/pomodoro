@@ -1,3 +1,5 @@
+import { type Language, messages } from './messages'
+
 // The work-and-break rhythm the pomodoro plugins share. Each agent creates an instance for each session
 // (createInstance), with a host that does its I/O, and passes it the session's events; whatever only one agent does
 // stays in that agent's code (docs/adr/0001). Inside, step() is pure: it says what to do, and the instance does it.
@@ -144,7 +146,7 @@ export const banner = (text: string) => [
 // /pomodoro, which an instance answers.
 export const COMMAND = {
 	name: 'pomodoro',
-	description: "Lists today's check-ins by repository.",
+	description: messages.en.description,
 }
 
 // What an agent gives an instance to do its I/O with. Each of these is general: what only one agent does stays in
@@ -201,9 +203,14 @@ export type Instance = {
 
 export function createInstance(
 	host: Host,
-	options: { settings: Settings; remote: boolean; kept?: unknown },
+	options: {
+		settings: Settings
+		remote: boolean
+		kept?: unknown
+		language: Language
+	},
 ): Instance {
-	const { settings, remote } = options
+	const { settings, remote, language } = options
 	let state: State = {
 		...initial,
 		sentKey: typeof options.kept === 'number' ? options.kept : undefined,
@@ -217,7 +224,7 @@ export function createInstance(
 
 	// Moves the rhythm on by one event, and returns what to carry out, in order.
 	function feed(event: Event) {
-		const next = step(state, event, settings)
+		const next = step(state, event, settings, language)
 		state = next.state
 		return next.effects
 	}
@@ -315,11 +322,11 @@ export function createInstance(
 			feed({ type: 'turnEnded' })
 		},
 		async command(args) {
-			if (!['', 'today'].includes(args.trim()))
-				return 'Usage: /pomodoro [today]'
+			if (!['', 'today'].includes(args.trim())) return messages[language].usage
 			return today(
 				((await host.load('checkIns')) ?? []) as CheckIn[],
 				await host.now(),
+				language,
 			)
 		},
 	}
@@ -336,13 +343,14 @@ const tomato = (settings: Settings, word = '') =>
 	settings.emoji ? '🍅 ' : word
 
 // What the person reads once the check-in went out, the same in every agent.
-export const notice = (settings: Settings) =>
-	`${tomato(settings)}Pomodoro: told the agent your pomodoro is up.`
+export const notice = (settings: Settings, language: Language) =>
+	`${tomato(settings)}${messages[language].notice}`
 
 function step(
 	state: State,
 	event: Event,
 	settings: Settings,
+	language: Language,
 ): { state: State; effects: Effect[] } {
 	switch (event.type) {
 		case 'activity':
@@ -359,7 +367,7 @@ function step(
 				effects: [],
 			}
 		case 'tick':
-			return tick(state, event, settings)
+			return tick(state, event, settings, language)
 		case 'toolResult':
 			return toolResult(state, event.isMain)
 		case 'reply':
@@ -401,7 +409,9 @@ function tick(
 	state: State,
 	{ now, timer, systemIdleMs }: Extract<Event, { type: 'tick' }>,
 	settings: Settings,
+	language: Language,
 ): { state: State; effects: Effect[] } {
+	const text = messages[language]
 	const workMs = settings.workMinutes * MINUTE
 	const breakMs = settings.breakMinutes * MINUTE
 	// Time since input that counts, from the watcher; else the system's input idle time; else time since this session's
@@ -419,7 +429,10 @@ function tick(
 			state: { ...state, due: undefined },
 			effects: [
 				{ type: 'persist', timer: { seenAt: now, lastInput } },
-				{ type: 'show', label: `${tomato(settings, 'pomodoro ')}on a break` },
+				{
+					type: 'show',
+					label: `${tomato(settings, 'pomodoro ')}${text.onABreak}`,
+				},
 			],
 		}
 	const effects: Effect[] = []
@@ -455,16 +468,16 @@ function tick(
 		},
 		{
 			type: 'show',
-			label: `${tomato(settings, 'pomodoro ')}${minutes}/${settings.workMinutes}m`,
+			label: `${tomato(settings, 'pomodoro ')}${text.count(minutes, settings.workMinutes)}`,
 			warning: isDue
-				? `${tomato(settings)}${minutes}m, time for a break`
+				? `${tomato(settings)}${text.warning(minutes)}`
 				: undefined,
 		},
 	)
 	if (shouldAlert)
 		effects.push({
 			type: 'alert',
-			text: `${minutes} minutes without a break. Stand up and look away from the screen for ${breakMs / MINUTE}.`,
+			text: text.alert(minutes, breakMs / MINUTE),
 			mark: tomato(settings),
 			sound: settings.sound,
 		})
@@ -524,7 +537,8 @@ const logged = (log: CheckIn[], entry: CheckIn): CheckIn[] => [
 ]
 
 // Today's check-ins at local time, under the name of their repository's folder.
-function today(log: CheckIn[], now: number) {
+function today(log: CheckIn[], now: number, language: Language) {
+	const words = messages[language]
 	const day = new Date(now).toDateString()
 	const byRepo = new Map<string | null, string[]>()
 	for (const { at, repo, text } of log)
@@ -533,10 +547,10 @@ function today(log: CheckIn[], now: number) {
 				...(byRepo.get(repo) ?? []),
 				`  ${new Date(at).toTimeString().slice(0, 5)}  ${text.replaceAll('\n', '\n         ')}`,
 			])
-	if (byRepo.size === 0) return 'No check-ins today.'
+	if (byRepo.size === 0) return words.noCheckIns
 	return [...byRepo]
 		.map(([repo, lines]) =>
-			[repo?.split(/[/\\]/).at(-1) ?? 'no repository', ...lines].join('\n'),
+			[repo?.split(/[/\\]/).at(-1) ?? words.noRepository, ...lines].join('\n'),
 		)
 		.join('\n\n')
 }

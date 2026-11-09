@@ -16,6 +16,7 @@ import {
 	type Settings,
 	settingsFrom,
 } from './core'
+import { type Language, languageFrom } from './messages'
 
 // A file's JSON, or undefined when it's missing or unreadable.
 const load = (path: string): Promise<unknown> =>
@@ -63,6 +64,8 @@ export default function (pi: ExtensionAPI) {
 	// This session's instance of core (lib/core), or why there's none.
 	let instance: Instance | undefined
 	let off: string | undefined
+	// The Mac's first language, read at the session's start.
+	let language: Language = 'en'
 
 	// Pi's side of core, for a session in `cwd`; `ui` only in the terminal UI.
 	const host = (cwd: string, ui: ExtensionUIContext | undefined): Host => ({
@@ -123,6 +126,10 @@ export default function (pi: ExtensionAPI) {
 			return
 		}
 		settings = read
+		const mac = await pi
+			.exec('defaults', ['read', '-g', 'AppleLanguages'], { timeout: 5_000 })
+			.catch(() => ({ stdout: '' }))
+		language = languageFrom(undefined, mac.stdout)
 		// The clock runs where the count shows: the terminal UI. Never with -p, --mode json or RPC.
 		const isTui = ctx.mode === 'tui'
 		const kept = ctx.sessionManager
@@ -131,6 +138,7 @@ export default function (pi: ExtensionAPI) {
 		instance = createInstance(host(ctx.cwd, isTui ? ctx.ui : undefined), {
 			settings,
 			remote: Boolean(process.env.SSH_CONNECTION),
+			language,
 			kept: kept?.type === 'custom' ? kept.data : undefined,
 		})
 		if (isTui) instance.start()
@@ -152,7 +160,7 @@ export default function (pi: ExtensionAPI) {
 		await instance?.activity()
 		const checkIn = instance?.toolResult(e.parentToolCallId === undefined)
 		if (checkIn === undefined) return
-		ctx.ui.notify(notice(settings), 'info')
+		ctx.ui.notify(notice(settings, language), 'info')
 		// Replacing the content drops the structured content unless it comes back too.
 		return {
 			content: [...e.content, { type: 'text', text: checkIn }],
