@@ -14,6 +14,7 @@ import {
 	type TallyEntry,
 	type Timer,
 } from './index'
+import { messages } from './messages'
 
 const T0 = 1_700_000_000_000
 const DAY = 24 * 60 * MINUTE
@@ -29,6 +30,18 @@ test("plugin.json's defaults are settingsFrom's", () => {
 		),
 	).toEqual(DEFAULTS)
 	expect(settingsFrom({})).toEqual(DEFAULTS)
+})
+
+// Claude Code's /config draws plugin.json's rows, which the plugin relabels in the person's language.
+test("plugin.json's titles and descriptions are the English ones", () => {
+	expect(
+		Object.fromEntries(
+			Object.entries(plugin.userConfig).map(([key, f]) => [
+				key,
+				{ label: f.title, description: f.description },
+			]),
+		),
+	).toEqual(messages.en.settings)
 })
 
 test('settingsFrom names every value of the wrong kind, takes an empty one as left out, and ignores the keys of older versions', () => {
@@ -50,6 +63,13 @@ test('settingsFrom names every value of the wrong kind, takes an empty one as le
 		})
 	expect(settingsFrom({ sound: '' })).toEqual(DEFAULTS)
 	expect(settingsFrom({ theme: 'dark' })).toEqual(DEFAULTS)
+	// In the person's language, where it's known (Pi).
+	expect(settingsFrom({ sound: 1 }, 'it')).toEqual({
+		problems: ['sound deve essere true o false'],
+	})
+	expect(settingsFrom(null, 'de')).toEqual({
+		problems: ['die Datei muss ein JSON-Objekt enthalten'],
+	})
 })
 
 type Pending = { at: number; every?: number; fn: () => void }
@@ -741,7 +761,7 @@ test('/pomodoro with anything else gives the usage', async () => {
 })
 
 const QUIET_ON =
-	'Quiet: no alert and no check-in, and the count goes on. It ends when you run /pomodoro quiet again, or lock the screen for 3 minutes.'
+	'Quiet is on: no alerts or check-ins until you run /pomodoro quiet again, or lock the screen or close the lid for 3 minutes. The count goes on.'
 const QUIET_OFF = 'Quiet is off.'
 
 test('quiet keeps counting with no alert or check-in, and the alert comes as soon as it ends', async () => {

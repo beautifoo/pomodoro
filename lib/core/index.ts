@@ -41,11 +41,15 @@ export const DEFAULTS = { sound: true, emoji: true }
 export type Settings = Readonly<typeof DEFAULTS>
 
 // The settings in a file's JSON or Claude Code's options, with the defaults for the keys left out or empty; or what's
-// wrong with them, as Claude Code checks a plugin's options: then neither agent runs the timer. Other keys, such as
-// the timings of an older version, are ignored.
-export function settingsFrom(json: unknown): Settings | { problems: string[] } {
+// wrong with them in `language`, as Claude Code checks a plugin's options: then neither agent runs the timer. Other
+// keys, such as the timings of an older version, are ignored.
+export function settingsFrom(
+	json: unknown,
+	language: Language = 'en',
+): Settings | { problems: string[] } {
+	const text = messages[language]
 	if (typeof json !== 'object' || json === null || Array.isArray(json))
-		return { problems: ['the file must hold a JSON object'] }
+		return { problems: [text.notObject] }
 	const file = json as Record<string, unknown>
 	const settings: Record<string, unknown> = { ...DEFAULTS }
 	const problems: string[] = []
@@ -53,7 +57,7 @@ export function settingsFrom(json: unknown): Settings | { problems: string[] } {
 		const value = file[key]
 		// Claude Code's check skips an empty value, then hands it on.
 		if (value === undefined || value === '') continue
-		if (typeof value !== 'boolean') problems.push(`${key} must be a boolean`)
+		if (typeof value !== 'boolean') problems.push(text.notBoolean(key))
 		else settings[key] = value
 	}
 	return problems.length > 0 ? { problems } : (settings as Settings)
@@ -564,7 +568,7 @@ function tick(
 				},
 				{
 					type: 'show',
-					label: `${tomato(settings, 'pomodoro ')}${text.onABreak}`,
+					label: `${tomato(settings, `${text.name} `)}${text.onABreak}`,
 				},
 			],
 		}
@@ -639,7 +643,7 @@ function tick(
 		},
 		{
 			type: 'show',
-			label: `${tomato(settings, 'pomodoro ')}${isQuiet ? `${text.quiet} · ` : ''}${text.count(position, Math.floor((worked % POMODORO) / MINUTE))}`,
+			label: `${tomato(settings, `${text.name} `)}${isQuiet ? `${text.quiet} · ` : ''}${text.count(position, Math.floor((worked % POMODORO) / MINUTE))}`,
 			warning: isDue
 				? `${tomato(settings)}${(isSetUp ? text.dueLong : text.due)(minutes)}`
 				: undefined,

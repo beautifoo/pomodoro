@@ -14,7 +14,7 @@ import {
 	type Settings,
 	settingsFrom,
 } from './core'
-import { type Language, languageFrom } from './messages'
+import { type Language, languageFrom, messages } from './messages'
 
 // A file's JSON, or undefined when it's missing or unreadable.
 const load = (path: string): Promise<unknown> =>
@@ -28,19 +28,19 @@ async function save(path: string, value: unknown) {
 	await rename(`${path}.${process.pid}`, path)
 }
 
-// The file's settings, the defaults without one, or what's wrong with it.
-async function readSettings(path: string) {
+// The file's settings, the defaults without one, or what's wrong with it in `language`.
+async function readSettings(path: string, language: Language) {
 	const text = await readFile(path, 'utf8').catch(
 		(error: NodeJS.ErrnoException) => error,
 	)
 	if (text instanceof Error)
 		return text.code === 'ENOENT'
 			? DEFAULTS
-			: { problems: [`the file can't be read (${text.code})`] }
+			: { problems: [messages[language].unreadable(String(text.code))] }
 	try {
-		return settingsFrom(JSON.parse(text))
+		return settingsFrom(JSON.parse(text), language)
 	} catch {
-		return { problems: ["the file isn't valid JSON"] }
+		return { problems: [messages[language].notJson] }
 	}
 }
 
@@ -107,18 +107,18 @@ export default function (pi: ExtensionAPI) {
 	pi.on('session_start', async (_, ctx) => {
 		instance = undefined
 		off = undefined
-		const read = await readSettings(settingsPath)
-		// No timer, as in Claude Code with a setting that doesn't fit; Claude Code says why only in its debug log.
-		if ('problems' in read) {
-			off = `Pomodoro is off: ${read.problems.join('; ')} (${settingsPath}).`
-			ctx.ui.notify(off, 'error')
-			return
-		}
-		settings = read
 		const mac = await pi
 			.exec('defaults', ['read', '-g', 'AppleLanguages'], { timeout: 5_000 })
 			.catch(() => ({ stdout: '' }))
 		language = languageFrom(undefined, mac.stdout)
+		const read = await readSettings(settingsPath, language)
+		// No timer, as in Claude Code with a setting that doesn't fit; Claude Code says why only in its debug log.
+		if ('problems' in read) {
+			off = messages[language].off(read.problems, settingsPath)
+			ctx.ui.notify(off, 'error')
+			return
+		}
+		settings = read
 		// The clock runs where the count shows: the terminal UI. Never with -p, --mode json or RPC.
 		const isTui = ctx.mode === 'tui'
 		const kept = ctx.sessionManager

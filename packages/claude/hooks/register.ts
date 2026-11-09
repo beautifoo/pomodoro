@@ -90,6 +90,8 @@ export const register: Register = (on, options) => {
 			.run([...APPLE_LANGUAGES], { cwd: '/', timeoutMs: 5_000 })
 			.catch(() => ({ stdout: '' }))
 		language = languageFrom(setting, mac.stdout)
+		// /config's rows were described before the language was known.
+		$.ui.invalidate('config.describe')
 		// Immediate: /pomodoro quiet typed while a turn is in flight runs at once, not once the turn ends. Nothing it does
 		// depends on the turn.
 		await $.command
@@ -103,6 +105,13 @@ export const register: Register = (on, options) => {
 		await begin($, settings, e.isInteractive)
 		return next(e)
 	})
+
+	// /config's rows for the two settings, in the person's language. A row's key is the plugin's name and the field.
+	for (const field of ['sound', 'emoji'] as const)
+		on('config.describe', { key: `pomodoro.${field}` }, async (_, e, next) => ({
+			...(await next(e)),
+			...messages[language].settings[field],
+		}))
 
 	// Reading the label while drawing redraws the footer on each new count.
 	on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {

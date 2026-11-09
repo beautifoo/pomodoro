@@ -5,13 +5,14 @@ import { expect, mock, test } from 'claude-code/testing'
 const T0 = 1_700_000_000_000
 const MIN = 60_000
 
-// The engine beneath the mod: a clock, a store, ioreg reporting `idle(now)` (null: no ioreg), the terminal's
-// notification, a repository at /code/app, and recorders. `notified` holds every banner, `osascripts` those osascript was asked for,
+// The engine beneath the mod: a clock, a store, ioreg reporting `idle(now)` (null: no ioreg), Claude Code's `language`
+// setting (none by default), the terminal's notification, a repository at /code/app, and recorders. `notified` holds every banner, `osascripts` those osascript was asked for,
 // `labels` each count written for the prompt footer.
 const world = (
 	on: On,
 	idle: (now: number) => number | null,
 	seed?: Record<string, unknown>,
+	language?: string,
 ) => {
 	const clock = mock.clock(on, { now: T0 })
 	// The mod's store, open to the test.
@@ -31,7 +32,7 @@ const world = (
 	// Each command the mod registered, as it asked.
 	const registered: unknown[] = []
 	// Without an answer the kit skips the whole session.start hook.
-	on('settings.read', () => ({ value: {} }))
+	on('settings.read', () => ({ value: { language } }))
 	on('session.start', (_, e) => ({ cwd: e.cwd }))
 	on('prompt.submit', (_, e) => ({ text: e.text }))
 	on('tool.call', () => ({ result: {} }))
@@ -123,6 +124,12 @@ const world = (
 		status.push(e.text)
 		return { value: undefined }
 	})
+	// Each cached answer the mod asked for again.
+	const invalidated: string[] = []
+	on('ui.invalidate', (_, e) => {
+		invalidated.push(e.event)
+		return { value: undefined }
+	})
 	on('state.set', { plugin: 'pomodoro', key: 'label' }, (_, e, next) => {
 		labels.push(e.value)
 		return next(e)
@@ -139,6 +146,7 @@ const world = (
 		toastMs,
 		chimes,
 		registered,
+		invalidated,
 		respond,
 	}
 }
@@ -264,13 +272,13 @@ test('/pomodoro quiet runs mid-turn, and the count shows it', async ($, on) => {
 		{
 			name: 'pomodoro',
 			description:
-				"Shows today's pomodoros and check-ins in this repository, or turns quiet on or off.",
+				"Shows today's pomodoros and check-ins in this repository, or turns quiet on or off to hold the alerts during a meeting.",
 			argumentHint: 'today | quiet',
 			immediate: true,
 		},
 	])
 	await clock.advance(10 * MIN)
-	expect(await pomodoro($, 'quiet')).toStartWith('Quiet: no alert')
+	expect(await pomodoro($, 'quiet')).toStartWith('Quiet is on: no alerts')
 	expect(labels.at(-1)).toBe('🍅 quiet · 1 of 4 · 10/25m')
 
 	// No alert, chime or warning while quiet; off, the alert at once.
@@ -280,6 +288,49 @@ test('/pomodoro quiet runs mid-turn, and the count shows it', async ($, on) => {
 	expect(labels.at(-1)).toBe('🍅 2 of 4 · 5/25m')
 	expect([notified.length, chimes.length]).toEqual([1, 1])
 	expect(status.at(-1)).toBe('🍅 30m, time for a break')
+})
+
+// Claude Code's free-text `language` setting before the Mac's; /config's rows for the plugin's settings too.
+test('in Italian, the count, /pomodoro and /config speak Italian', async ($, on) => {
+	// The menu's own answer beneath the mod's, which passes the row through.
+	on('config.describe', (_, e) => ({
+		label: e.label,
+		description: e.description,
+		isHidden: e.isHidden,
+	}))
+	const { clock, labels, registered, invalidated } = world(
+		on,
+		() => 0,
+		undefined,
+		'Italiano',
+	)
+	await start($)
+	await clock.settle()
+	expect(labels.at(-1)).toBe('🍅 1 di 4 · 0/25 min')
+	expect(JSON.stringify(registered)).toContain('Mostra i pomodori')
+	expect(await pomodoro($, 'today')).toBe('Oggi: ancora nessun pomodoro.')
+
+	// /config asks again once the language is known.
+	expect(invalidated).toEqual(['config.describe'])
+
+	const row = {
+		label: 'Chime',
+		description: 'x',
+		isHidden: false,
+		provider: { plugin: 'pomodoro', tier: 'user' },
+	} as const
+	expect(
+		await $.config.describe({ key: 'pomodoro.sound', ...row }),
+	).toMatchObject({ label: 'Suono', isHidden: false })
+	expect(
+		await $.config.describe({ key: 'pomodoro.emoji', ...row }),
+	).toMatchObject({ label: 'Emoji del pomodoro' })
+	// Another row is left as it is.
+	expect(await $.config.describe({ key: 'theme', ...row })).toEqual({
+		label: 'Chime',
+		description: 'x',
+		isHidden: false,
+	})
 })
 
 test('back from a break, a toast says so, with no banner and no chime', async ($, on) => {
