@@ -78,6 +78,8 @@ type Effect =
 	// The count, and the warning while a break is due.
 	| { type: 'show'; label: string; warning?: string }
 	| { type: 'alert'; text: string; mark: string; sound: boolean }
+	// Back from a break: a toast, with no banner and no chime.
+	| { type: 'toast'; text: string }
 	// Add `text` to this tool result.
 	| { type: 'checkIn'; key: number; text: string }
 	// Add the summary to the log.
@@ -143,6 +145,8 @@ export type Host = {
 	show: (label: string, warning?: string) => void
 	// The agent's own alert.
 	notify: (text: string, mark: string) => Promise<void>
+	// A plain toast, which comes and goes on its own.
+	toast: (text: string) => void
 	// What the session keeps across a reload, to hand back to createInstance.
 	keep: (kept: Kept) => void
 }
@@ -250,6 +254,7 @@ export function createInstance(
 			else if (effect.type === 'show') host.show(effect.label, effect.warning)
 			else if (effect.type === 'alert')
 				await alert(effect.text, effect.sound, effect.mark)
+			else if (effect.type === 'toast') host.toast(effect.text)
 		}
 	}
 
@@ -476,6 +481,7 @@ function tick(
 		timer.breakStart ?? (isGap ? (timer.lastInput ?? timer.seenAt) : undefined)
 	let blockStart = timer.blockStart ?? now
 	let done = timer.done ?? 0
+	let away: number | undefined
 	if (leftAt !== undefined) {
 		// Back at the first input of the run that counted again. Not a look from before the break began, which was stray
 		// input; without one (no looks, or another session's input ended the break), at the person's latest presence.
@@ -485,7 +491,7 @@ function tick(
 				: now - idle
 		// The pomodoros up before the break count, one cut short doesn't; a long break starts a new set. A break that began
 		// before any activity (at 0, off macOS) began long ago.
-		const away = Math.max(0, backAt - leftAt)
+		away = Math.max(0, backAt - leftAt)
 		done =
 			away >= LONG_BREAK
 				? 0
@@ -526,6 +532,15 @@ function tick(
 				: undefined,
 		},
 	)
+	// Back, once: this tick stores the timer without the break, so another session's has none to end. In whole minutes, as
+	// the count's; not from a break that began before any activity, which has no length to tell.
+	if (away !== undefined && leftAt !== 0) {
+		const minutesAway = Math.floor(away / MINUTE)
+		effects.push({
+			type: 'toast',
+			text: `${tomato(settings)}${away >= LONG_BREAK ? text.backLong(minutesAway) : text.back(minutesAway, position)}`,
+		})
+	}
 	if (shouldAlert)
 		effects.push({
 			type: 'alert',

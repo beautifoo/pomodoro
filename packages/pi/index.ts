@@ -93,6 +93,8 @@ export default function (pi: ExtensionAPI) {
 		notify: async (text, mark) => {
 			ui?.notify(`${mark}${text}`, 'warning')
 		},
+		// An info line, which Pi shows dim.
+		toast: (text) => ui?.notify(text, 'info'),
 		keep: (kept) => pi.appendEntry(KEPT, kept),
 	})
 

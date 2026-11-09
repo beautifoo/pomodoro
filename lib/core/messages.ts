@@ -17,6 +17,9 @@ export type Messages = {
 	dueLong: (minutes: number) => string
 	alert: (minutes: number) => string
 	alertLong: (minutes: number) => string
+	// Back from a break: the minutes away, and the pomodoro of the set taken up again, or a new set after a long break.
+	back: (minutes: number, position: number) => string
+	backLong: (minutes: number) => string
 	// Once the check-in went out.
 	notice: string
 }
@@ -34,6 +37,9 @@ const en: Messages = {
 		`${minutes} minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.`,
 	alertLong: (minutes) =>
 		`${minutes} minutes without a break. Your set of 4 pomodoros is done: take a 15 to 30 minute break.`,
+	back: (minutes, position) =>
+		`Back after ${minutes}m · pomodoro ${position} of 4`,
+	backLong: (minutes) => `Back after ${minutes}m · new set, pomodoro 1 of 4`,
 	notice: 'Pomodoro: told the agent your pomodoro is up.',
 }
 

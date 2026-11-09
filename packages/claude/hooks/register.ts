@@ -53,6 +53,8 @@ function host($: EngineInterface): Host {
 			$.ui.toast(`${mark}${text}`, { timeoutMs: 15_000 })
 			await $.ui.notify(text, { title: 'Pomodoro' }).catch(() => {})
 		},
+		// A toast alone, shorter than the alert's.
+		toast: (text) => $.ui.toast(text, { timeoutMs: 8_000 }),
 		keep: (kept) => void $.state.set(KEPT, kept).catch(() => {}),
 	}
 }

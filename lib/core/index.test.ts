@@ -52,7 +52,7 @@ type Pending = { at: number; every?: number; fn: () => void }
 
 // An agent in memory: a clock at T0, the store (open to the test, which ages it to stand for a stretch with no tick),
 // ioreg reporting `idle(now)` (null: no ioreg) and whether the screen is `locked(now)`, a repository at /code/app, the
-// agent's own alert, and what the host was asked to do.
+// agent's own alert, its toast, and what the host was asked to do.
 function world({
 	idle = () => 0,
 	locked = () => false,
@@ -73,6 +73,7 @@ function world({
 	const runs: (readonly string[])[] = []
 	const shows: { label: string; warning?: string }[] = []
 	const notified: string[] = []
+	const toasts: string[] = []
 	const keeps: number[] = []
 	const host: Host = {
 		now: async () => now,
@@ -98,6 +99,9 @@ function world({
 		},
 		notify: async (text, mark) => {
 			notified.push(`${mark}${text}`)
+		},
+		toast: (text) => {
+			toasts.push(text)
 		},
 		keep: (kept) => {
 			keeps.push(kept)
@@ -131,6 +135,7 @@ function world({
 		runs,
 		shows,
 		notified,
+		toasts,
 		keeps,
 		now: () => now,
 		set,
@@ -321,13 +326,14 @@ test('over SSH ioreg never runs: activity stands in, and 3 minutes without it is
 	await pomodoro.activity(true)
 	await w.advance(3 * MINUTE)
 	expect(w.runs).toEqual([])
-	// No activity before the first tick: nothing to say the person was there.
+	// No activity before the first tick: nothing to say the person was there, nor how long they were away.
 	expect(w.shows.map((show) => show.label)).toEqual([
 		'🍅 on a break',
 		'🍅 1 of 4 · 1/25m',
 		'🍅 1 of 4 · 2/25m',
 		'🍅 on a break',
 	])
+	expect(w.toasts).toEqual([])
 })
 
 test("one check-in per pomodoro, on a main-loop tool result, kept so that a reloaded instance gives only the next pomodoro's", async () => {
@@ -1010,4 +1016,53 @@ test('the return is never before the break began, and a break from 0 is a long o
 			warning: undefined,
 		})
 	}
+})
+
+// In use for 25 minutes, then away for `away` minutes and back `into` the minute after, in `sessions` sessions of one
+// agent: the toasts by 3 minutes after the return.
+async function toastsAfter(
+	away: number,
+	{
+		into = 10_000,
+		settings = {},
+		sessions = 1,
+	}: { into?: number; settings?: Partial<Settings>; sessions?: number } = {},
+) {
+	const backAt = T0 + (25 + away) * MINUTE + into
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 25 * MINUTE),
+			...steady(backAt, backAt + 5 * MINUTE),
+		]),
+	})
+	for (let i = 0; i < sessions; i++) start(w, settings)
+	await w.set(backAt + 3 * MINUTE)
+	return w.toasts
+}
+
+// Whole minutes away, rounded down as the count's are: back 10 or 50 seconds into the fifth minute is 4.
+test('coming back from a short break, a toast says how long and which pomodoro', async () => {
+	for (const into of [10_000, 50_000])
+		expect(await toastsAfter(4, { into })).toEqual([
+			'🍅 Back after 4m · pomodoro 2 of 4',
+		])
+})
+
+test('coming back from a long break, the toast says a new set begins', async () => {
+	expect(await toastsAfter(22)).toEqual([
+		'🍅 Back after 22m · new set, pomodoro 1 of 4',
+	])
+})
+
+test('without the emoji, the toast has no tomato', async () => {
+	expect(await toastsAfter(4, { settings: { emoji: false } })).toEqual([
+		'Back after 4m · pomodoro 2 of 4',
+	])
+})
+
+// The tick that ends the break stores the timer without it, so the other session's tick has none to end.
+test('two sessions, one toast', async () => {
+	expect(await toastsAfter(4, { sessions: 2 })).toEqual([
+		'🍅 Back after 4m · pomodoro 2 of 4',
+	])
 })

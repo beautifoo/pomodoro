@@ -106,9 +106,12 @@ const world = (
 		notified.push(e.text)
 		return { value: { isSent: true, channel: 'ghostty' } }
 	})
+	// Each toast's text, and how long it stays.
 	const toasts: string[] = []
+	const toastMs: (number | undefined)[] = []
 	on('ui.toast', (_, e) => {
 		toasts.push(e.text)
+		toastMs.push(e.timeoutMs)
 		return { value: undefined }
 	})
 	on('ui.status', (_, e) => {
@@ -128,6 +131,7 @@ const world = (
 		status,
 		labels,
 		toasts,
+		toastMs,
 		chimes,
 		respond,
 	}
@@ -238,6 +242,23 @@ test("the alert goes through the terminal's notification, and nothing else posts
 	])
 	expect(chimes.length).toBe(1)
 	expect(osascripts).toEqual([])
+})
+
+test('back from a break, a toast says so, with no banner and no chime', async ($, on) => {
+	let leftAt = Infinity
+	const { clock, notified, chimes, toasts, toastMs } = world(on, (now) =>
+		now >= leftAt ? now - leftAt : 0,
+	)
+	await start($)
+	await clock.advance(25 * MIN)
+	leftAt = clock.now()
+	await clock.advance(4 * MIN)
+	leftAt = Infinity
+	await clock.advance(MIN)
+	expect(toasts.at(-1)).toBe('🍅 Back after 4m · pomodoro 2 of 4')
+	expect(toastMs.at(-1)).toBe(8_000)
+	// The one banner and the one chime are the alert's.
+	expect([notified.length, chimes.length]).toEqual([1, 1])
 })
 
 test('the check-in rides the next tool result, once per pomodoro, and never waits in an idle session', async ($, on) => {
