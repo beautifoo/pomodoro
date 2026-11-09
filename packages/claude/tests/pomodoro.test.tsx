@@ -433,6 +433,21 @@ test("a subagent's tool calls don't hold off a break, the main loop's do", async
 	expect(labels.at(-1)).toBe('🍅 on a break')
 })
 
+test("the person's own prompt ends a break", async ($, on) => {
+	// No input since the start.
+	const { clock, labels } = world(on, (now) => now - T0)
+	await start($)
+	await clock.advance(4 * MIN)
+	expect(labels.at(-1)).toBe('🍅 on a break')
+	await $.prompt.submit({
+		text: 'Go on.',
+		wait: false,
+		origin: { kind: 'composer' },
+	})
+	await clock.advance(MIN)
+	expect(labels.at(-1)).toBe('🍅 0/25m')
+})
+
 test('without ioreg, a break is a break from every session', async ($, on) => {
 	// Another session was in use 10 seconds ago, 20 minutes into a pomodoro: a fresh session keeps that pomodoro.
 	const { clock, notified, labels } = world(on, () => null, {

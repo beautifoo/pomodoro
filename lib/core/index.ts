@@ -56,8 +56,8 @@ type State = {
 }
 
 type Event =
-	// The main loop's prompt, reply, or tool call as it starts or ends.
-	| { type: 'activity'; now: number }
+	// The main loop's prompt, reply, or tool call as it starts or ends; the person's own for a prompt.
+	| { type: 'activity'; now: number; byPerson: boolean }
 	// A look at the system's input idle time, which ioreg reads.
 	| { type: 'look'; now: number; idleMs: number }
 	// The minute's tick, with the stored timer and whether the screen is locked.
@@ -153,8 +153,9 @@ export type Instance = {
 	stop: () => void
 	// One tick now, as the clock would.
 	tick: () => Promise<void>
-	// A prompt, a reply, or a tool call as it starts or ends; only the main loop's is the person being there.
-	activity: (isMain: boolean) => Promise<void>
+	// A prompt, a reply, or a tool call as it starts or ends; only the main loop's is the person being there. A prompt the
+	// person submitted is their own input too.
+	activity: (isMain: boolean, byPerson?: boolean) => Promise<void>
 	// The check-in to add to this tool result, if it's of the main loop and one is due: once per pomodoro.
 	toolResult: (isMain: boolean) => string | undefined
 	// A finished response of the main loop, which may hold the summary.
@@ -269,7 +270,7 @@ export function createInstance(
 			cancelWake?.()
 		},
 		tick: runTick,
-		async activity(isMain) {
+		async activity(isMain, byPerson = false) {
 			const now = await host.now()
 			// After a sleep the tick comes first, so a check-in due before it isn't sent.
 			if (
@@ -279,7 +280,7 @@ export function createInstance(
 			)
 				await runTick().catch(() => {})
 			// A subagent's work isn't the person being there.
-			if (isMain) feed({ type: 'activity', now })
+			if (isMain) feed({ type: 'activity', now, byPerson })
 		},
 		toolResult(isMain) {
 			const [checkIn] = feed({ type: 'toolResult', isMain })
@@ -327,8 +328,18 @@ export function step(
 	language: Language,
 ): { state: State; effects: Effect[] } {
 	switch (event.type) {
-		case 'activity':
-			return { state: { ...state, lastActivity: event.now }, effects: [] }
+		case 'activity': {
+			const { now, byPerson } = event
+			const active = { ...state, lastActivity: now }
+			// The person's prompt counts at once as input. Without the looks, the activity stands in for input already.
+			return {
+				state:
+					byPerson && state.lastInputThatCounts !== undefined
+						? inputCounts(active, now, now, now)
+						: active,
+				effects: [],
+			}
+		}
 		case 'look':
 			return {
 				state: looked(state, event.now, event.idleMs),
@@ -346,43 +357,64 @@ export function step(
 	}
 }
 
-// A look puts the latest input `idleMs` before `now`, and saw input when that's after the look before. Input counts once
-// looks saw it USE_LOOKS times within a minute, so a stray key, a click or a jiggler's nudge never does, before a break
-// or during one.
+// A look puts the latest input `idleMs` before `now`, and saw input when that's after the look before.
 function looked(state: State, now: number, idleMs: number): State {
 	const latest = now - idleMs
 	// The first look counts at once: the input before the instance started, so a reload doesn't end a break.
 	if (state.lookedAt === undefined || state.lastInputThatCounts === undefined)
 		return { ...state, lookedAt: now, lastInputThatCounts: latest }
-	// Input under the lock screen (the password, a jiggler) never counts, nor adds to the input after it.
-	if (state.lockedSince !== undefined)
-		return { ...state, lookedAt: now, looks: [] }
-	const sawInput = latest > state.lookedAt
-	const looks = [
-		...state.looks.filter((at) => now - at < MINUTE),
-		...(sawInput ? [latest] : []),
-	]
-	if (!sawInput || looks.length < USE_LOOKS)
-		return { ...state, lookedAt: now, looks }
-	// Back after a break's length or more without input that counts: from the first look of this run.
-	const isBack = now - state.lastInputThatCounts >= SHORT_BREAK
+	const looks = latest > state.lookedAt ? [...state.looks, latest] : state.looks
+	return counted({ ...state, lookedAt: now, looks }, now)
+}
+
+// Input counts once looks saw it USE_LOOKS times within a minute, so a stray key, a click or a jiggler's nudge never
+// does, before a break or during one. Looks under the lock screen wait for a tick to see it unlocked, so the password
+// alone, one look, doesn't count, and the input right after it does.
+function counted(state: State, now: number): State {
+	const looks = state.looks.filter((at) => now - at < MINUTE)
+	if (state.lockedSince !== undefined || looks.length < USE_LOOKS)
+		return { ...state, looks }
+	return inputCounts(
+		{ ...state, looks },
+		now,
+		Math.max(...looks),
+		Math.min(...looks),
+	)
+}
+
+// Input that counts, the latest at `latest`. After a break's length or more without any, the person is back from
+// `from`, the first input of the run.
+function inputCounts(
+	state: State,
+	now: number,
+	latest: number,
+	from: number,
+): State {
+	const last = state.lastInputThatCounts ?? latest
 	return {
 		...state,
-		lookedAt: now,
-		looks,
-		lastInputThatCounts: latest,
-		backAt: isBack ? looks[0] : state.backAt,
+		lastInputThatCounts: Math.max(last, latest),
+		backAt: now - last >= SHORT_BREAK ? from : state.backAt,
 	}
 }
 
 function tick(
-	state: State,
+	previous: State,
 	{ now, timer, isLocked }: Extract<Event, { type: 'tick' }>,
 	settings: Settings,
 	language: Language,
 ): { state: State; effects: Effect[] } {
 	const text = messages[language]
-	const lockedSince = isLocked ? (state.lockedSince ?? now) : undefined
+	// The lock first, kept from the first tick that saw it: once a tick sees the screen unlocked, the looks kept meanwhile
+	// count.
+	const state = counted(
+		{
+			...previous,
+			lockedSince: isLocked ? (previous.lockedSince ?? now) : undefined,
+		},
+		now,
+	)
+	const { lockedSince } = state
 	// The person's last input that counts, from the looks at ioreg, and the main agent's last activity; without the
 	// looks, both are the activity. Each is the latest any session has seen, so an idle session can't end the pomodoro
 	// another one is working in.
@@ -404,7 +436,7 @@ function tick(
 	// the next one sets it again, and where another session's input ends this break first, there's none to read.
 	if (idle >= SHORT_BREAK)
 		return {
-			state: { ...state, lockedSince, due: undefined, backAt: undefined },
+			state: { ...state, due: undefined, backAt: undefined },
 			effects: [
 				{
 					type: 'persist',
@@ -474,7 +506,7 @@ function tick(
 				text: check(minutes),
 			}
 		: undefined
-	return { state: { ...state, lockedSince, due }, effects }
+	return { state: { ...state, due }, effects }
 }
 
 // The check-in rides a tool result of the main loop, once per pomodoro. It counts as sent from here, so two tool

@@ -132,8 +132,9 @@ export default function (pi: ExtensionAPI) {
 		instance?.stop()
 	})
 
-	pi.on('input', async () => {
-		await instance?.activity(true)
+	// Input the person typed is their own input too; one an extension sent isn't.
+	pi.on('input', async (e) => {
+		await instance?.activity(true, e.source === 'interactive')
 	})
 
 	// A tool call counts as the agent's activity as it starts and as it ends, not while it waits; one another tool made

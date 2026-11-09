@@ -747,3 +747,52 @@ test('a break keeps its start through a reload', async () => {
 	expect(w.label()).toBe('🍅 on a break')
 	expect((w.store.timer as Timer).breakStart).toBe(T0 - 20 * MINUTE)
 })
+
+// The tick that first sees the screen unlocked, the minute's or the wake at the 3-minute mark, comes after the input
+// that followed the lock: that input counts from there.
+test('a lock of under 3 minutes is no break when the person is back right after it', async () => {
+	for (const [from, to] of [
+		[10 * MINUTE + 5_000, 12 * MINUTE + 5_000],
+		// Only the wake at 13:31 sees this one end.
+		[10 * MINUTE + 30_000, 13 * MINUTE + 5_000],
+	] as const) {
+		const w = world({
+			idle: inputs([
+				...steady(T0, T0 + from),
+				...steady(T0 + to, T0 + 16 * MINUTE + 5_000),
+			]),
+			locked: (now) => now >= T0 + from && now < T0 + to,
+		})
+		start(w)
+		await w.set(T0 + 16 * MINUTE)
+		expect(w.shows.map((show) => show.label)).not.toContain('🍅 on a break')
+		expect(w.label()).toBe('🍅 16/25m')
+	}
+})
+
+test("a prompt is the person's own input: it ends a break", async () => {
+	// In use to 10 minutes in, then a 4-second prompt at 14, and only the main agent after it.
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 10 * MINUTE),
+			...steady(T0 + 13 * MINUTE + 56_000, T0 + 14 * MINUTE),
+		]),
+	})
+	const pomodoro = start(w)
+	await w.set(T0 + 14 * MINUTE)
+	expect(w.label()).toBe('🍅 on a break')
+	expect((w.store.timer as Timer).breakStart).toBe(T0 + 10 * MINUTE)
+	await pomodoro.activity(true, true)
+	for (
+		let at = T0 + 14 * MINUTE + 30_000;
+		at <= T0 + 15 * MINUTE;
+		at += 30_000
+	) {
+		await w.set(at)
+		await pomodoro.activity(true)
+	}
+	expect(w.label()).toBe('🍅 0/25m')
+	const timer = w.store.timer as Timer
+	expect(timer.lastInput).toBe(T0 + 14 * MINUTE)
+	expect(timer.breakStart).toBeUndefined()
+})

@@ -110,8 +110,9 @@ export const register: Register = (on, options) => {
 		)
 	})
 
+	// A prompt the person entered is their own input too; one from /loop, a schedule, a notification or a peer isn't.
 	on('prompt.submit', async (_, e, next) => {
-		await instance?.activity(true)
+		await instance?.activity(true, e.origin.kind === 'composer')
 		return next(e)
 	})
 
