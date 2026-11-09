@@ -9,6 +9,7 @@ import {
 	MINUTE,
 	type Settings,
 	settingsFrom,
+	step,
 } from './index'
 
 const T0 = 1_700_000_000_000
@@ -515,6 +516,29 @@ test('3 minutes away is a break, 2 minutes 59 is not', async () => {
 	expect(w.label()).toBe('🍅 12/25m')
 	await w.set(T0 + 13 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
+})
+
+// Another session's input can end this one's break before its own looks see the return: what it read at the last
+// return is never taken for this one.
+test('a break forgets when the person came back from the last one', () => {
+	type State = Parameters<typeof step>[0]
+	type Event = Parameters<typeof step>[1]
+	let state: State = { lastActivity: 0, looks: [], awaitingSummary: false }
+	const feed = (...events: Event[]) => {
+		for (const event of events) state = step(state, event, DEFAULTS, 'en').state
+	}
+	// Input that counts to 30 seconds in, then a break.
+	const look = (at: number) => ({ type: 'look', now: at, idleMs: 0 }) as const
+	const tick = (at: number) => ({ type: 'tick', now: at, timer: {} }) as const
+	feed(...[0, 10, 20, 30].map((s) => look(T0 + s * 1_000)))
+	feed(tick(T0 + 3.5 * MINUTE))
+	expect(state.backAt).toBeUndefined()
+	// Back 4 minutes in, from the first of three looks that saw input.
+	feed(...[240, 250, 260].map((s) => look(T0 + s * 1_000)))
+	expect(state.backAt).toBe(T0 + 4 * MINUTE)
+	// Away again: the next break forgets that return.
+	feed(tick(T0 + 4.5 * MINUTE), tick(T0 + 7.5 * MINUTE))
+	expect(state.backAt).toBeUndefined()
 })
 
 test("a reload while the person is away doesn't end their break", async () => {

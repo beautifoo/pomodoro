@@ -295,7 +295,8 @@ const tomato = (settings: Settings, word = '') =>
 export const notice = (settings: Settings, language: Language) =>
 	`${tomato(settings)}${messages[language].notice}`
 
-function step(
+// Exported for its tests, which read the state an instance keeps to itself.
+export function step(
 	state: State,
 	event: Event,
 	settings: Settings,
@@ -360,9 +361,11 @@ function tick(
 	const lastInput = Math.max(timer.lastInput ?? 0, now - idleMs)
 	const idle = now - lastInput
 
+	// A break forgets the last return: the look that counts the next one sets it again, and where another session's input
+	// ends this break first, there's none to read.
 	if (idle >= SHORT_BREAK)
 		return {
-			state: { ...state, due: undefined },
+			state: { ...state, due: undefined, backAt: undefined },
 			effects: [
 				{ type: 'persist', timer: { seenAt: now, lastInput } },
 				{
