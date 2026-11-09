@@ -227,7 +227,7 @@ test("the alert goes through the terminal's notification, and nothing else posts
 	await start($)
 	await clock.advance(25 * MIN)
 	expect(notified).toEqual([
-		'25 minutes without a break. Stand up and look away from the screen for 5.',
+		'25 minutes without a break. Stand up and look away from the screen for 3.',
 	])
 	expect(chimes.length).toBe(1)
 	expect(osascripts).toEqual([])
@@ -235,7 +235,7 @@ test("the alert goes through the terminal's notification, and nothing else posts
 
 test('the check-in rides the next tool result, once per pomodoro, and never waits in an idle session', async ($, on) => {
 	let leftAt = Infinity
-	const { clock, session } = world(on, (now) =>
+	const { clock, session, labels } = world(on, (now) =>
 		now >= leftAt ? now - leftAt : 0,
 	)
 	await start($)
@@ -255,11 +255,13 @@ test('the check-in rides the next tool result, once per pomodoro, and never wait
 	await clock.advance(25 * MIN)
 	expect(await checked($)).toBe(true)
 
-	// A break clears what is due.
+	// A break of 3 minutes clears what is due, and steady input ends it.
 	leftAt = clock.now()
-	await clock.advance(6 * MIN)
+	await clock.advance(3 * MIN)
+	expect(labels.at(-1)).toBe('🍅 on a break')
 	leftAt = Infinity
 	await clock.advance(MIN)
+	expect(labels.at(-1)).toBe('🍅 0/25m')
 	expect(await checked($)).toBe(false)
 })
 
@@ -332,7 +334,7 @@ test(
 		await clock.advance(25 * MIN)
 		expect(status.at(-1)).toBe('25m, time for a break')
 		expect(toasts).toEqual([
-			'25 minutes without a break. Stand up and look away from the screen for 5.',
+			'25 minutes without a break. Stand up and look away from the screen for 3.',
 		])
 		expect(await checked($)).toBe(true)
 		expect(JSON.stringify(session.appended())).toContain(
@@ -388,24 +390,20 @@ test("a turn that ends without the summary, answered or cut short, logs nothing,
 	expect(store.checkIns).toBe(undefined)
 })
 
-test('when the watcher ends, ioreg stands in', async ($, on) => {
-	// ioreg sees the person away since 10 minutes before the start; the watcher sees them back a second in, then ends.
-	let leftAt = T0 - 10 * MIN
+test("ioreg's idle time is the input: 3 minutes away is a break, and steady use ends it", async ($, on) => {
+	// ioreg sees the person away since 3 minutes before the start.
+	let leftAt = T0 - 3 * MIN
 	const { clock, labels } = world(on, (now) =>
 		now >= leftAt ? now - leftAt : 0,
 	)
-	on('process.spawn', async function* () {
-		await clock.sleep(1_000)
-		yield { stream: 'stdout' as const, text: `${T0 + 1_000}\n` }
-		await clock.sleep(90_000)
-		return { value: { code: 1, signal: null } }
-	})
 	await start($)
+	await clock.settle()
+	expect(labels.at(-1)).toBe('🍅 on a break')
+
+	// Back at the keyboard.
+	leftAt = Infinity
 	await clock.set(T0 + MIN)
 	expect(labels.at(-1)).toBe('🍅 0/25m')
-
-	// Still at the keyboard, which only ioreg sees now.
-	leftAt = Infinity
 	await clock.set(T0 + 10 * MIN)
 	expect(labels.at(-1)).toBe('🍅 9/25m')
 })

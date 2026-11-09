@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import {
@@ -82,23 +81,6 @@ export default function (pi: ExtensionAPI) {
 		save: (key, value) => save(paths[key], value),
 		run: async ([file, ...args], timeoutMs) =>
 			(await pi.exec(file, args, { timeout: timeoutMs })).stdout,
-		// Leaving Pi ends the child.
-		spawn: ([file, ...args], onOutput, onEnd) => {
-			const child = spawn(file, args, {
-				cwd: '/',
-				stdio: ['ignore', 'pipe', 'ignore'],
-			})
-			child.stdout.setEncoding('utf8').on('data', onOutput)
-			// Once its output is all read; an error (it couldn't start) may come with a close or alone.
-			let hasEnded = false
-			const ended = () => {
-				if (hasEnded) return
-				hasEnded = true
-				onEnd()
-			}
-			child.on('error', ended).on('close', ended)
-			return () => child.kill()
-		},
 		repo: async () => {
 			const { code, stdout } = await pi
 				.exec('git', ['rev-parse', '--show-toplevel'], { cwd, timeout: 5_000 })

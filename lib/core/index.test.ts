@@ -6,7 +6,6 @@ import {
 	createInstance,
 	DEFAULTS,
 	type Host,
-	IOREG,
 	MINUTE,
 	type Settings,
 	settingsFrom,
@@ -49,8 +48,8 @@ test('settingsFrom names every value of the wrong kind, takes an empty one as le
 type Pending = { at: number; every?: number; fn: () => void }
 
 // An agent in memory: a clock at T0, the store (open to the test, which ages it to stand for a stretch with no tick),
-// ioreg reporting `idle(now)` (null: no ioreg), a watcher the test prints through, a repository at /code/app, the
-// agent's own alert, and what the host was asked to do.
+// ioreg reporting `idle(now)` (null: no ioreg), a repository at /code/app, the agent's own alert, and what the host was
+// asked to do.
 function world({
 	idle = () => 0,
 	seed = {},
@@ -70,9 +69,6 @@ function world({
 	const shows: { label: string; warning?: string }[] = []
 	const notified: string[] = []
 	const keeps: number[] = []
-	const spawned: (readonly string[])[] = []
-	let kills = 0
-	let watcher: { onOutput: (text: string) => void; onEnd: () => void }
 	const host: Host = {
 		now: async () => now,
 		after: (ms, fn) => schedule({ at: now + ms, fn }),
@@ -88,13 +84,6 @@ function world({
 			if (ms === null) throw new Error('no ioreg')
 			// Indented, as ioreg prints it.
 			return `    |   "HIDIdleTime" = ${ms * 1e6}\n`
-		},
-		spawn: (argv, onOutput, onEnd) => {
-			spawned.push(argv)
-			watcher = { onOutput, onEnd }
-			return () => {
-				kills++
-			}
 		},
 		repo: async () => '/code/app',
 		show: (label, warning) => {
@@ -136,21 +125,12 @@ function world({
 		shows,
 		notified,
 		keeps,
-		spawned,
-		kills: () => kills,
 		now: () => now,
 		set,
 		advance: (ms: number) => set(now + ms),
 		settle: () => set(now),
 		pending: () => timers.size,
 		label: () => shows.at(-1)?.label,
-		// The watcher prints each [time, text] at its time, then ends at `endsAt`.
-		watch(pieces: [number, string][], endsAt?: number) {
-			for (const [at, text] of pieces)
-				schedule({ at, fn: () => watcher.onOutput(text) })
-			if (endsAt !== undefined)
-				schedule({ at: endsAt, fn: () => watcher.onEnd() })
-		},
 	}
 }
 
@@ -171,6 +151,14 @@ function start(
 	pomodoro.start()
 	return pomodoro
 }
+
+// ioreg's idle time for input at each of `times`: since the latest at or before `now`, or since long before the first.
+const inputs = (times: number[]) => (now: number) =>
+	now - Math.max(T0 - DAY, ...times.filter((at) => at <= now))
+
+// Input every 2 seconds from `from` to `to`, as in steady use.
+const steady = (from: number, to: number) =>
+	Array.from({ length: (to - from) / 2_000 + 1 }, (_, i) => from + i * 2_000)
 
 // The chimes the alerts ran.
 const sounds = (w: World) => w.runs.filter((argv) => argv[0] !== 'ioreg')
@@ -197,8 +185,8 @@ test('alerts when a pomodoro is up, then every break length while there is no br
 	})
 	await w.advance(5 * MINUTE)
 	expect(w.notified).toEqual([
-		'🍅 25 minutes without a break. Stand up and look away from the screen for 5.',
-		'🍅 30 minutes without a break. Stand up and look away from the screen for 5.',
+		'🍅 25 minutes without a break. Stand up and look away from the screen for 3.',
+		'🍅 30 minutes without a break. Stand up and look away from the screen for 3.',
 	])
 	// Ghostty shows the banner of the tab in front for a few seconds only, and a Focus silences it: each alert also chimes.
 	expect(sounds(w)).toEqual([CHIME, CHIME])
@@ -227,9 +215,9 @@ test('a closed lid clears the status line: the pomodoro that starts on waking is
 	expect(w.shows.at(-1)).toEqual({ label: '🍅 0/25m', warning: undefined })
 })
 
-test('a break of just the break length counts, and no alert comes during it', async () => {
+test('a break of just 3 minutes counts, and no alert comes during it', async () => {
 	const leftAt = T0 + 25 * MINUTE + 10_000
-	const backAt = leftAt + 5 * MINUTE + 5_000
+	const backAt = leftAt + 3 * MINUTE + 5_000
 	const w = world({
 		idle: (now) => (now >= leftAt && now < backAt ? now - leftAt : 0),
 	})
@@ -237,12 +225,12 @@ test('a break of just the break length counts, and no alert comes during it', as
 	await w.advance(25 * MINUTE)
 	expect(w.notified.length).toBe(1)
 
-	await w.set(leftAt + 5 * MINUTE + 2_000)
+	await w.set(leftAt + 3 * MINUTE + 2_000)
 	expect(w.label()).toBe('🍅 on a break')
 	expect(w.notified.length).toBe(1)
 
 	// Back at work: a fresh pomodoro, alerting 25 minutes after its first tick.
-	await w.set(T0 + 31 * MINUTE)
+	await w.set(T0 + 29 * MINUTE)
 	expect(w.label()).toBe('🍅 0/25m')
 	await w.advance(24 * MINUTE)
 	expect(w.notified.length).toBe(1)
@@ -251,10 +239,10 @@ test('a break of just the break length counts, and no alert comes during it', as
 })
 
 test('a gap with no tick (sleep, no session open) counts as a break', async () => {
-	// The last tick a minute before keeps the pomodoro; one a break's length before is a gap.
+	// The last tick a minute before keeps the pomodoro; one 3 minutes before is a gap.
 	for (const [seenAgo, label] of [
 		[MINUTE, '🍅 20/25m'],
-		[5 * MINUTE, '🍅 0/25m'],
+		[3 * MINUTE, '🍅 0/25m'],
 	] as const) {
 		const w = world({
 			seed: { timer: { blockStart: T0 - 20 * MINUTE, seenAt: T0 - seenAgo } },
@@ -276,26 +264,29 @@ test('a gap with no tick (sleep, no session open) counts as a break', async () =
 	expect(w.notified.length).toBe(1)
 })
 
-// Idle for just over 4 minutes, every tick asks for a wake, the moment the break would start. With the next minute's tick
-// coming before that wake and replacing it, only the minute's ticks run.
+// Away for just over 2 minutes, each tick asks for a wake at the moment the break would start, and replaces the wake
+// before: once the minute's tick finds the break, one wake is left to run.
 test("one wake is pending at most: the ticks don't pile up while a break is near", async () => {
-	const w = world({ idle: () => 4 * MINUTE + 500 })
-	start(w)
-	await w.settle()
-	const before = w.shows.length
-	await w.advance(10 * MINUTE)
-	expect(w.shows.length - before).toBe(10)
-	// The minute's clock and one wake.
-	expect(w.pending()).toBe(2)
-})
-
-test('stop cancels the clock and the wake and ends the watcher, and no tick runs after it', async () => {
-	const w = world({ idle: () => 4 * MINUTE + 500 })
+	const w = world({ idle: inputs([T0 - 2 * MINUTE - 500]) })
 	const pomodoro = start(w)
 	await w.settle()
-	expect(w.pending()).toBe(2)
+	for (let i = 0; i < 3; i++) {
+		await w.advance(5_000)
+		await pomodoro.tick()
+	}
+	// The minute's clock, the looks and one wake.
+	expect(w.pending()).toBe(3)
+	const before = w.shows.length
+	await w.advance(MINUTE)
+	expect(w.shows.length - before).toBe(2)
+})
+
+test('stop cancels the clock, the looks and the wake, and no tick runs after it', async () => {
+	const w = world({ idle: () => 2 * MINUTE + 500 })
+	const pomodoro = start(w)
+	await w.settle()
+	expect(w.pending()).toBe(3)
 	pomodoro.stop()
-	expect(w.kills()).toBe(1)
 	expect(w.pending()).toBe(0)
 	const [shown, ran] = [w.shows.length, w.runs.length]
 	await w.advance(10 * MINUTE)
@@ -303,7 +294,7 @@ test('stop cancels the clock and the wake and ends the watcher, and no tick runs
 
 	// Stopped while its first tick is under way: that tick carries out nothing, so a session that took its place doesn't
 	// see its count.
-	const early = world({ idle: () => 4 * MINUTE + 500 })
+	const early = world({ idle: () => 2 * MINUTE + 500 })
 	start(early).stop()
 	await early.advance(10 * MINUTE)
 	expect(early.shows.length).toBe(0)
@@ -311,18 +302,19 @@ test('stop cancels the clock and the wake and ends the watcher, and no tick runs
 	expect(early.pending()).toBe(0)
 })
 
-test('over SSH no watcher starts and ioreg never runs: activity stands in', async () => {
+test('over SSH ioreg never runs: activity stands in, and 3 minutes without it is a break, 2 is not', async () => {
 	const w = world()
 	const pomodoro = start(w, {}, { remote: true })
 	await w.settle()
 	await pomodoro.activity()
-	await w.advance(MINUTE)
-	expect(w.spawned).toEqual([])
+	await w.advance(3 * MINUTE)
 	expect(w.runs).toEqual([])
 	// No activity before the first tick: nothing to say the person was there.
 	expect(w.shows.map((show) => show.label)).toEqual([
 		'🍅 on a break',
 		'🍅 0/25m',
+		'🍅 1/25m',
+		'🍅 on a break',
 	])
 })
 
@@ -443,82 +435,93 @@ test("/pomodoro lists today's check-ins by repository, and gives its usage for a
 	expect(await pomodoro.command('yesterday')).toBe('Usage: /pomodoro [today]')
 })
 
-// Mouse movement the watcher saw at each time; a key, click or scroll comes with its `k` line too.
-const moves = (times: number[]) =>
-	times.map((at): [number, string] => [at, `${at}\n`])
-const keys = (times: number[]) =>
-	times.map((at): [number, string] => [at, `${at}\nk${at}\n`])
-
-// Work until 29 minutes in (2 seconds of movement every 20, seen 4 times a second), away for 11, back at 40.
-// A mouse jiggler nudges every minute all along: two events 80 ms apart.
-const jiggledDay = () => {
-	const stretch = (from: number) =>
-		Array.from({ length: 9 }, (_, i) => from + i * 250)
-	const work = Array.from({ length: 87 }, (_, i) => T0 + 5_000 + i * 20_000)
-	const nudges = Array.from({ length: 50 }, (_, i) => T0 + i * MINUTE + 12_000)
-	return moves(
-		[
-			...work.flatMap(stretch),
-			...nudges.flatMap((at) => [at, at + 80]),
-			...stretch(T0 + 40 * MINUTE + 10_000),
-		].sort((a, b) => a - b),
-	)
-}
-
-test("a mouse jiggler's nudge doesn't keep a break from starting", async () => {
-	const w = world()
-	w.watch(jiggledDay())
+// A keep-awake app's jiggler nudges the mouse each minute: seen by one look, it never counts.
+test("a jiggler's nudge every minute neither holds off a break nor ends one", async () => {
+	// In use to 29 minutes in, then only the nudge, 12 seconds into each minute, and in use again from 40.
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 29 * MINUTE),
+			...Array.from({ length: 11 }, (_, i) => T0 + (29 + i) * MINUTE + 12_000),
+			...steady(T0 + 40 * MINUTE, T0 + 45 * MINUTE),
+		]),
+	})
 	start(w)
-	await w.set(T0 + 35 * MINUTE)
+	await w.set(T0 + 33 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
-
+	await w.set(T0 + 39 * MINUTE)
+	expect(w.label()).toBe('🍅 on a break')
 	await w.set(T0 + 41 * MINUTE)
 	expect(w.label()).toBe('🍅 0/25m')
 })
 
-test('mouse movement counts once it lasts a second, not before', async () => {
-	// The input before the watcher started, a second in, then a stretch of movement a minute in: 1 s, or just under.
-	const after = async (stretch: number[]) => {
-		const w = world()
-		w.watch(moves([T0 + 1_000, ...stretch]))
-		start(w)
-		await w.set(T0 + 6 * MINUTE)
-		return w.label()
-	}
-	expect(await after([T0 + 61_000, T0 + 61_500, T0 + 62_000])).toBe('🍅 6/25m')
-	expect(await after([T0 + 61_000, T0 + 61_500, T0 + 61_999])).toBe(
-		'🍅 on a break',
-	)
+test('a stray key, or a click, never ends a break', async () => {
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 10 * MINUTE),
+			T0 + 14 * MINUTE,
+			T0 + 14 * MINUTE + 30_000,
+		]),
+	})
+	start(w)
+	await w.set(T0 + 16 * MINUTE)
+	expect(w.label()).toBe('🍅 on a break')
 })
 
-test('a lone key, click or scroll counts at once', async () => {
-	const w = world()
+test('input seen in three looks within a minute counts', async () => {
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 10 * MINUTE),
+			T0 + 14 * MINUTE + 5_000,
+			T0 + 14 * MINUTE + 15_000,
+			T0 + 14 * MINUTE + 25_000,
+		]),
+	})
+	start(w)
+	await w.set(T0 + 14 * MINUTE)
+	expect(w.label()).toBe('🍅 on a break')
+	await w.set(T0 + 15 * MINUTE)
+	expect(w.label()).toBe('🍅 0/25m')
+})
+
+test('scrolling now and then while reading holds off a break', async () => {
+	// A scroll every 20 seconds for 10 minutes.
+	const w = world({
+		idle: inputs(Array.from({ length: 31 }, (_, i) => T0 + i * 20_000)),
+	})
+	start(w)
+	await w.set(T0 + 10 * MINUTE)
+	expect(w.shows.map((show) => show.label)).not.toContain('🍅 on a break')
+	expect(w.label()).toBe('🍅 10/25m')
+})
+
+test("an input every 30 seconds doesn't hold off a break", async () => {
 	// One press every 30 seconds, as when answering the agent's prompts or paging through a diff.
-	w.watch(keys(Array.from({ length: 16 }, (_, i) => T0 + (i + 1) * 30_000)))
+	const w = world({
+		idle: inputs(Array.from({ length: 17 }, (_, i) => T0 + i * 30_000)),
+	})
 	start(w)
+	await w.set(T0 + 2 * MINUTE)
+	expect(w.label()).toBe('🍅 2/25m')
 	await w.set(T0 + 8 * MINUTE)
-	expect(w.label()).toBe('🍅 8/25m')
+	expect(w.label()).toBe('🍅 on a break')
 })
 
-test('a watcher line split across two output pieces counts once, as one whole line', async () => {
-	const w = world()
-	// Movement a second in, then a key 3 minutes in, whose line comes in two pieces.
-	const key = `k${T0 + 3 * MINUTE}\n`
-	w.watch([
-		[T0 + 1_000, `${T0 + 1_000}\n`],
-		[T0 + 3 * MINUTE, key.slice(0, 6)],
-		[T0 + 3 * MINUTE + 1, key.slice(6)],
-	])
-	start(w)
-	await w.set(T0 + 7 * MINUTE)
-	expect(w.label()).toBe('🍅 7/25m')
+test('3 minutes away is a break, 2 minutes 59 is not', async () => {
+	// In use to 10 minutes in.
+	const w = world({ idle: inputs(steady(T0, T0 + 10 * MINUTE)) })
+	const pomodoro = start(w)
+	await w.set(T0 + 12 * MINUTE + 59_000)
+	await pomodoro.tick()
+	expect(w.label()).toBe('🍅 12/25m')
+	await w.set(T0 + 13 * MINUTE)
+	expect(w.label()).toBe('🍅 on a break')
 })
 
 test("a reload while the person is away doesn't end their break", async () => {
-	// 26 minutes into a pomodoro, last input 4 minutes ago: the watcher's first line says so, as ioreg does.
-	const leftAt = T0 - 4 * MINUTE
+	// 26 minutes into a pomodoro, last input 2 minutes ago: the first look says so, and counts at once.
+	const leftAt = T0 - 2 * MINUTE
 	const w = world({
-		idle: (now) => now - leftAt,
+		idle: inputs([leftAt]),
 		seed: {
 			timer: {
 				blockStart: T0 - 26 * MINUTE,
@@ -527,20 +530,9 @@ test("a reload while the person is away doesn't end their break", async () => {
 			},
 		},
 	})
-	w.watch([[T0 + 100, `${leftAt}\n`]])
 	start(w)
 	await w.set(T0 + 2 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
-	// From the watcher's first line on, it's gone by, not ioreg.
-	expect(w.runs).toEqual([IOREG])
-})
-
-test('when the watcher ends, ioreg stands in', async () => {
-	const w = world()
-	w.watch([[T0 + 1_000, `${T0 + 1_000}\n`]], T0 + 1_000)
-	start(w)
-	await w.set(T0 + 10 * MINUTE)
-	expect(w.label()).toBe('🍅 10/25m')
 })
 
 test('without ioreg, a break is a break from every session', async () => {
@@ -565,6 +557,9 @@ test('without ioreg, a break is a break from every session', async () => {
 	}
 	expect(w.notified.length).toBe(1)
 
-	await w.advance(6 * MINUTE)
+	// 2 minutes without activity is no break, 3 are.
+	await w.advance(MINUTE)
+	expect(w.label()).toBe('🍅 26/25m')
+	await w.advance(MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
 })

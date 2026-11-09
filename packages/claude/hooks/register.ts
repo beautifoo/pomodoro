@@ -41,19 +41,6 @@ function host($: EngineInterface): Host {
 		save: (key, value) => $.store.set(key, value),
 		run: async (argv, timeoutMs) =>
 			(await $.process.run(argv, { cwd: '/', timeoutMs })).stdout,
-		// Leaving the loop, or the module unloading, ends the child.
-		spawn: (argv, onOutput, onEnd) => {
-			const child = $.process.spawn({ argv, cwd: '/' })
-			void (async () => {
-				try {
-					for await (const { stream, text } of child)
-						if (stream === 'stdout') onOutput(text)
-				} catch {}
-				onEnd()
-			})()
-			return () =>
-				void child.return({ code: null, signal: 'SIGTERM' }).catch(() => {})
-		},
 		repo: async () => (await $.session.repo())?.root ?? null,
 		// The count is a mode label in the prompt footer. The status line, which Claude Code marks ⚠, only says a break
 		// is due.
@@ -80,7 +67,7 @@ async function begin(
 		(read) => read.value,
 		() => undefined,
 	)
-	// Like ioreg, the watcher sees the console's input, not the input of an SSH session.
+	// ioreg sees the console's input, not the input of an SSH session.
 	const remote = Boolean(await $.env.get('SSH_CONNECTION'))
 	if (instance !== undefined) return
 	instance = createInstance(host($), { settings, remote, kept, language })

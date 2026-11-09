@@ -36,13 +36,16 @@ export function settingsFrom(json: unknown): Settings | { problems: string[] } {
 	return problems.length > 0 ? { problems } : (settings as Settings)
 }
 
-// One session's own: its last prompt or tool call, the stretch of mouse movement under way, the last input that counts
-// (undefined: no watcher), the check-in now due, the last one sent, and whether the summary it asked for is still to
-// log.
+// One session's own: its last prompt or tool call; its last look at ioreg, and the latest input of each look that saw
+// input in the last minute; the last input that counts (undefined: no look yet); when the person came back from the
+// latest break, by the first look of the run that made input count again; the check-in now due, the last one sent, and
+// whether the summary it asked for is still to log.
 type State = {
 	lastActivity: number
-	stretch: { start: number; last: number }
+	lookedAt?: number
+	looks: number[]
 	lastInputThatCounts?: number
+	backAt?: number
 	due?: { key: number; text: string }
 	sentKey?: number
 	awaitingSummary: boolean
@@ -51,11 +54,10 @@ type State = {
 type Event =
 	// A prompt or a tool call.
 	| { type: 'activity'; now: number }
-	// A line the watcher printed.
-	| { type: 'input'; line: string }
-	| { type: 'watcherEnded' }
-	// The minute's tick, with the stored timer and the system's input idle time where ioreg reads one.
-	| { type: 'tick'; now: number; timer: Timer; systemIdleMs?: number }
+	// A look at the system's input idle time, which ioreg reads.
+	| { type: 'look'; now: number; idleMs: number }
+	// The minute's tick, with the stored timer.
+	| { type: 'tick'; now: number; timer: Timer }
 	| { type: 'toolResult'; isMain: boolean }
 	// A finished response of the main loop, and the end of its turn (in Pi, the run).
 	| { type: 'reply'; text: string }
@@ -77,46 +79,24 @@ type Effect =
 
 export const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
-// A pomodoro; the break that ends it, and that the alert repeats after; the time away after which the alert is skipped.
+// A pomodoro; the time away that makes a break; how often the alert repeats; the time away after which it's skipped.
 const POMODORO = 25 * MINUTE
-const BREAK = 5 * MINUTE
+const SHORT_BREAK = 3 * MINUTE
 const REPEAT = 5 * MINUTE
 const AWAY = 2 * MINUTE
-// Mouse movement counts once it has lasted this long.
-const MOVE = 1_000
-// Movement less than this apart is one stretch; the watcher looks 4 times a second.
-const STRETCH_GAP = 1_000
+// How often the instance looks at the input idle time, and how many looks within a minute must see input for it to
+// count: a stray key, a click or a jiggler's nudge is one look.
+const LOOK = 10_000
+const USE_LOOKS = 3
 
 const initial: State = {
 	lastActivity: 0,
-	stretch: { start: 0, last: 0 },
+	looks: [],
 	awaitingSummary: false,
 }
 
-// The command that runs a macOS JXA script, which prints the time of the latest input each time it changes (macOS HID
-// idle time, 4 times a second), and with a `k` before it the time of the latest key, click or scroll: a mouse jiggler
-// only moves the pointer.
-const WATCHER = [
-	'osascript',
-	'-l',
-	'JavaScript',
-	'-e',
-	`ObjC.import('CoreGraphics')
-const out = $.NSFileHandle.fileHandleWithStandardOutput
-const latest = (...types) => Math.round(Date.now() - 1e3 * Math.min(...types.map((t) => $.CGEventSourceSecondsSinceLastEventType(1, t))))
-const print = (line) => out.writeData($(line + '\\n').dataUsingEncoding($.NSUTF8StringEncoding))
-let lastAny = 0
-let lastKey = 0
-for (;;) {
-	const any = latest(0xffffffff)
-	const key = latest(10, 12, 1, 3, 25, 22)
-	if (any - lastAny > 50) print(lastAny = any)
-	if (key - lastKey > 50) print('k' + (lastKey = key))
-	delay(0.25)
-}`,
-]
-
-// The command that prints macOS's input idle time, and that time in its output (undefined: none, as off macOS).
+// The command that prints macOS's input idle time (about 22 ms), and that time in its output (undefined: none, as off
+// macOS).
 export const IOREG = ['ioreg', '-r', '-c', 'IOHIDSystem', '-d', '1']
 function ioregIdleMs(stdout: string) {
 	const ns = stdout.match(/"HIDIdleTime" = (\d+)/)?.[1]
@@ -144,13 +124,6 @@ export type Host = {
 	save: (key: 'timer' | 'checkIns', value: unknown) => Promise<void>
 	// A command's output; a rejection or '' when it can't run, which core takes the same.
 	run: (argv: readonly string[], timeoutMs?: number) => Promise<string>
-	// A command that runs on: its output as it comes, in pieces that needn't be lines, then `onEnd` once it ended or
-	// couldn't start. Returns what ends it.
-	spawn: (
-		argv: readonly string[],
-		onOutput: (text: string) => void,
-		onEnd: () => void,
-	) => () => void
 	// The root of the session's repository (null: none).
 	repo: () => Promise<string | null>
 	// The count, and the warning while a break is due.
@@ -167,7 +140,7 @@ export type Kept = number
 
 // One session's: each agent passes it the session's events.
 export type Instance = {
-	// The clock, and the watcher unless over SSH: only where the count shows.
+	// The clock, and the looks at ioreg unless over SSH: only where the count shows.
 	start: () => void
 	stop: () => void
 	// One tick now, as the clock would.
@@ -198,10 +171,9 @@ export function createInstance(
 		...initial,
 		sentKey: typeof options.kept === 'number' ? options.kept : undefined,
 	}
-	// The watcher's output after its last full line, and what ends it, the minute's clock and the wake.
-	let partial = ''
-	let kill: (() => void) | undefined
+	// What ends the minute's clock, the looks and the wake.
 	let cancelClock: (() => void) | undefined
+	let cancelLooks: (() => void) | undefined
 	let cancelWake: (() => void) | undefined
 	let isStopped = false
 
@@ -212,20 +184,11 @@ export function createInstance(
 		return next.effects
 	}
 
-	// Where osascript can't run (not macOS) it ends at once, and ioreg's idle time stands in, or where there's none, the
-	// session's activity.
-	function watch() {
-		kill = host.spawn(
-			WATCHER,
-			(text) => {
-				const lines = (partial + text).split('\n')
-				partial = lines.pop() ?? ''
-				for (const line of lines) feed({ type: 'input', line })
-			},
-			() => {
-				feed({ type: 'watcherEnded' })
-			},
-		)
+	// Where ioreg gives nothing (not macOS) there's no look, and the session's activity stands in.
+	async function look() {
+		const now = await host.now()
+		const idleMs = ioregIdleMs(await host.run(IOREG, 5_000).catch(() => ''))
+		if (idleMs !== undefined) feed({ type: 'look', now, idleMs })
 	}
 
 	// The agent's alert, then the chime.
@@ -236,14 +199,17 @@ export function createInstance(
 	}
 
 	async function runTick() {
+		// A tick on its own (the clock never started) or with the looks behind takes one first; over SSH ioreg would see
+		// the console's input.
+		const { lookedAt } = state
+		if (
+			!remote &&
+			(lookedAt === undefined || (await host.now()) - lookedAt > LOOK)
+		)
+			await look()
 		const now = await host.now()
 		const timer = ((await host.load('timer')) ?? {}) as Timer
-		// ioreg only when the watcher isn't there to go by; over SSH it would see the console's input.
-		const systemIdleMs =
-			state.lastInputThatCounts === undefined && !remote
-				? ioregIdleMs(await host.run(IOREG, 5_000).catch(() => ''))
-				: undefined
-		for (const effect of feed({ type: 'tick', now, timer, systemIdleMs })) {
+		for (const effect of feed({ type: 'tick', now, timer })) {
 			// A tick still under way when the instance stopped carries out nothing more: its session is gone.
 			if (isStopped) return
 			// Each wake aims at the moment the stretch without input becomes a break, so the newest replaces the last.
@@ -273,9 +239,10 @@ export function createInstance(
 	return {
 		start() {
 			if (cancelClock !== undefined || isStopped) return
-			// Like ioreg, the watcher sees the console's input, not the input of an SSH session.
-			// ponytail: one watcher per open session; share one across sessions if many sessions matter
-			if (!remote) watch()
+			// ioreg sees the console's input, not the input of an SSH session. The first tick takes the first look.
+			// ponytail: looks per open session; share them across sessions if many sessions matter
+			if (!remote)
+				cancelLooks = host.every(LOOK, () => void look().catch(() => {}))
 			// A failed tick is retried by the next one.
 			void runTick().catch(() => {})
 			cancelClock = host.every(MINUTE, () => void runTick().catch(() => {}))
@@ -283,8 +250,8 @@ export function createInstance(
 		stop() {
 			isStopped = true
 			cancelClock?.()
+			cancelLooks?.()
 			cancelWake?.()
-			kill?.()
 		},
 		tick: runTick,
 		async activity() {
@@ -337,15 +304,9 @@ function step(
 	switch (event.type) {
 		case 'activity':
 			return { state: { ...state, lastActivity: event.now }, effects: [] }
-		case 'input':
+		case 'look':
 			return {
-				state: sawInput(state, event.line, MOVE),
-				effects: [],
-			}
-		// It ended or never started: the system's idle time stands in, where every input counts.
-		case 'watcherEnded':
-			return {
-				state: { ...state, lastInputThatCounts: undefined },
+				state: looked(state, event.now, event.idleMs),
 				effects: [],
 			}
 		case 'tick':
@@ -360,51 +321,46 @@ function step(
 	}
 }
 
-// Keys, clicks and scrolls count at once, mouse movement once its stretch lasts `minMs`: a mouse jiggler's nudge
-// (keep-awake apps) is a blip.
-function sawInput(state: State, line: string, minMs: number): State {
-	const isKey = line.startsWith('k')
-	const at = Number(isKey ? line.slice(1) : line)
-	if (!(at > 0)) return state
-	const stretch = isKey
-		? state.stretch
-		: {
-				start: at - state.stretch.last > STRETCH_GAP ? at : state.stretch.start,
-				last: at,
-			}
-	// The first line is the input before the watcher started, as the system's idle time tells it: a reload doesn't end a
-	// break.
-	const counts =
-		state.lastInputThatCounts === undefined ||
-		isKey ||
-		at - stretch.start >= minMs
+// A look puts the latest input `idleMs` before `now`, and saw input when that's after the look before. Input counts once
+// looks saw it USE_LOOKS times within a minute, so a stray key, a click or a jiggler's nudge never does, before a break
+// or during one.
+function looked(state: State, now: number, idleMs: number): State {
+	const latest = now - idleMs
+	// The first look counts at once: the input before the instance started, so a reload doesn't end a break.
+	if (state.lookedAt === undefined || state.lastInputThatCounts === undefined)
+		return { ...state, lookedAt: now, lastInputThatCounts: latest }
+	const sawInput = latest > state.lookedAt
+	const looks = [
+		...state.looks.filter((at) => now - at < MINUTE),
+		...(sawInput ? [latest] : []),
+	]
+	if (!sawInput || looks.length < USE_LOOKS)
+		return { ...state, lookedAt: now, looks }
+	// Back after a break's length or more without input that counts: from the first look of this run.
+	const isBack = now - state.lastInputThatCounts >= SHORT_BREAK
 	return {
 		...state,
-		stretch,
-		lastInputThatCounts: counts
-			? Math.max(state.lastInputThatCounts ?? 0, at)
-			: state.lastInputThatCounts,
+		lookedAt: now,
+		looks,
+		lastInputThatCounts: latest,
+		backAt: isBack ? looks[0] : state.backAt,
 	}
 }
 
 function tick(
 	state: State,
-	{ now, timer, systemIdleMs }: Extract<Event, { type: 'tick' }>,
+	{ now, timer }: Extract<Event, { type: 'tick' }>,
 	settings: Settings,
 	language: Language,
 ): { state: State; effects: Effect[] } {
 	const text = messages[language]
-	// Time since input that counts, from the watcher; else the system's input idle time; else time since this session's
-	// last activity.
-	const idleMs =
-		state.lastInputThatCounts !== undefined
-			? now - state.lastInputThatCounts
-			: (systemIdleMs ?? now - state.lastActivity)
+	// Time since input that counts, from the looks at ioreg; without them, since this session's last activity.
+	const idleMs = now - (state.lastInputThatCounts ?? state.lastActivity)
 	// The latest input any session has seen, so an idle session can't end the pomodoro another one is working in.
 	const lastInput = Math.max(timer.lastInput ?? 0, now - idleMs)
 	const idle = now - lastInput
 
-	if (idle >= BREAK)
+	if (idle >= SHORT_BREAK)
 		return {
 			state: { ...state, due: undefined },
 			effects: [
@@ -416,14 +372,12 @@ function tick(
 			],
 		}
 	const effects: Effect[] = []
-	// Ticks are a minute apart: look again the moment this stretch without input would become a break.
-	if (idle > BREAK - MINUTE)
-		effects.push({ type: 'wake', afterMs: BREAK - idle + 1_000 })
+	// Ticks are a minute apart: tick again the moment this stretch without input would become a break.
+	if (idle > SHORT_BREAK - MINUTE)
+		effects.push({ type: 'wake', afterMs: SHORT_BREAK - idle + 1_000 })
 
-	// No tick for a break's length (two ticks at least): the machine slept or no session was open.
-	const isGap =
-		timer.seenAt === undefined ||
-		now - timer.seenAt >= Math.max(BREAK, 2 * MINUTE)
+	// No tick for a break's length: the machine slept or no session was open.
+	const isGap = timer.seenAt === undefined || now - timer.seenAt >= SHORT_BREAK
 	const blockStart =
 		isGap || timer.blockStart === undefined ? now : timer.blockStart
 	const worked = now - blockStart
@@ -457,7 +411,7 @@ function tick(
 	if (shouldAlert)
 		effects.push({
 			type: 'alert',
-			text: text.alert(minutes, BREAK / MINUTE),
+			text: text.alert(minutes, SHORT_BREAK / MINUTE),
 			mark: tomato(settings),
 			sound: settings.sound,
 		})
