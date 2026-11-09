@@ -178,8 +178,16 @@ export default function (pi: ExtensionAPI) {
 		instance?.turnEnded()
 	})
 
+	// Pi runs it at once, mid-run too.
 	pi.registerCommand(COMMAND.name, {
 		description: COMMAND.description,
+		// Pi's counterpart of Claude Code's argument hint.
+		getArgumentCompletions: (prefix) => {
+			const items = ['today', 'quiet']
+				.filter((value) => value.startsWith(prefix))
+				.map((value) => ({ value, label: value }))
+			return items.length > 0 ? items : null
+		},
 		handler: async (args, ctx) => {
 			ctx.ui.notify(
 				(await instance?.command(args)) ?? off ?? '',

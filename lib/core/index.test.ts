@@ -436,7 +436,7 @@ test("check-ins older than 14 days are dropped, and /pomodoro today lists only t
 	)
 })
 
-test("/pomodoro lists today's check-ins by repository, and gives its usage for anything but today", async () => {
+test("/pomodoro lists today's check-ins by repository", async () => {
 	const w = world()
 	const pomodoro = start(w)
 	for (const args of ['', ' today '])
@@ -450,7 +450,107 @@ test("/pomodoro lists today's check-ins by repository, and gives its usage for a
 		expect(await pomodoro.command(args)).toMatch(
 			/^app\n {2}\d\d:\d\d {2}Pomodoro: on the goal\.\n\nno repository\n {2}\d\d:\d\d {2}Line one\.\n {9}Line two\.$/,
 		)
-	expect(await pomodoro.command('yesterday')).toBe('Usage: /pomodoro [today]')
+})
+
+test('/pomodoro with anything else gives the usage', async () => {
+	const w = world()
+	const pomodoro = start(w)
+	for (const args of ['yesterday', 'quiet now'])
+		expect(await pomodoro.command(args)).toBe('Usage: /pomodoro [today|quiet]')
+	expect((w.store.timer as Timer | undefined)?.quiet).toBeFalsy()
+})
+
+const QUIET_ON =
+	'Quiet: no alert and no check-in, and the count goes on. It ends when you run /pomodoro quiet again, or lock the screen for 3 minutes.'
+const QUIET_OFF = 'Quiet is off.'
+
+test('quiet keeps counting with no alert or check-in, and the alert comes as soon as it ends', async () => {
+	const w = world()
+	const pomodoro = start(w)
+	await w.set(T0 + 20 * MINUTE)
+	expect(await pomodoro.command('quiet')).toBe(QUIET_ON)
+	expect(w.label()).toBe('🍅 quiet · 1 of 4 · 20/25m')
+	await w.set(T0 + 60 * MINUTE)
+	expect(w.notified).toEqual([])
+	expect(pomodoro.toolResult(true)).toBeUndefined()
+	expect(w.shows.at(-1)).toEqual({
+		label: '🍅 quiet · 3 of 4 · 10/25m',
+		warning: undefined,
+	})
+	// Off: a tick at once, which alerts and makes the check-in due.
+	expect(await pomodoro.command(' quiet ')).toBe(QUIET_OFF)
+	expect(w.notified).toEqual([
+		'🍅 60 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
+	])
+	expect(w.shows.at(-1)).toEqual({
+		label: '🍅 3 of 4 · 10/25m',
+		warning: '🍅 60m, time for a break',
+	})
+	expect(pomodoro.toolResult(true)).toBeDefined()
+})
+
+// Even when the last alert was a minute before quiet began.
+test('the alert comes as soon as quiet ends, however soon after the last one', async () => {
+	const w = world()
+	const pomodoro = start(w)
+	await w.set(T0 + 26 * MINUTE)
+	await pomodoro.command('quiet')
+	await w.set(T0 + 28 * MINUTE)
+	await pomodoro.command('quiet')
+	expect(w.notified.length).toBe(2)
+})
+
+test('while quiet, sitting still is no break, however long', async () => {
+	// In use for a minute, then nothing from the person or the main agent.
+	const w = world({ idle: inputs(steady(T0, T0 + MINUTE)) })
+	const pomodoro = start(w)
+	await w.set(T0 + MINUTE)
+	await pomodoro.command('quiet')
+	await w.set(T0 + 41 * MINUTE)
+	expect(w.shows.map((show) => show.label)).not.toContain('🍅 on a break')
+	expect(w.label()).toBe('🍅 quiet · 2 of 4 · 16/25m')
+	// Once it's off, sitting still counts from then: the alert, and 3 minutes later a break.
+	await pomodoro.command('quiet')
+	expect(w.notified.length).toBe(1)
+	await w.set(T0 + 43 * MINUTE)
+	expect(w.label()).toBe('🍅 2 of 4 · 18/25m')
+	await w.set(T0 + 44 * MINUTE)
+	expect(w.label()).toBe('🍅 on a break')
+	expect((w.store.timer as Timer).breakStart).toBe(T0 + 41 * MINUTE)
+})
+
+test('locking the screen for 3 minutes ends quiet, a gap too', async () => {
+	// In use for 5 minutes, then sitting still, and the screen locked from 10.
+	const locked = world({
+		idle: inputs(steady(T0, T0 + 5 * MINUTE)),
+		locked: (now) => now >= T0 + 10 * MINUTE,
+	})
+	const pomodoro = start(locked)
+	await locked.set(T0 + MINUTE)
+	await pomodoro.command('quiet')
+	await locked.set(T0 + 12 * MINUTE + 59_000)
+	expect(locked.label()).toBe('🍅 quiet · 1 of 4 · 12/25m')
+	await locked.set(T0 + 13 * MINUTE)
+	expect(locked.label()).toBe('🍅 on a break')
+	expect((locked.store.timer as Timer).quiet).toBeFalsy()
+
+	// The lid closed at 5 minutes for 5, and in use again from when it opens: quiet stays off after the return.
+	const gap = world({
+		idle: inputs([
+			...steady(T0, T0 + 5 * MINUTE),
+			...steady(T0 + 10 * MINUTE, T0 + 15 * MINUTE),
+		]),
+	})
+	const closed = start(gap)
+	await gap.set(T0 + MINUTE)
+	await closed.command('quiet')
+	await gap.set(T0 + 5 * MINUTE)
+	gap.sleep(5 * MINUTE)
+	await gap.advance(10_000)
+	expect(gap.label()).toBe('🍅 on a break')
+	expect((gap.store.timer as Timer).quiet).toBeFalsy()
+	await gap.advance(MINUTE)
+	expect(gap.label()).toBe('🍅 1 of 4 · 0/25m')
 })
 
 // A keep-awake app's jiggler nudges the mouse each minute: seen by one look, it never counts.

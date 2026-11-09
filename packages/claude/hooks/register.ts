@@ -91,11 +91,14 @@ export const register: Register = (on, options) => {
 			.run([...APPLE_LANGUAGES], { cwd: '/', timeoutMs: 5_000 })
 			.catch(() => ({ stdout: '' }))
 		language = languageFrom(setting, mac.stdout)
+		// Immediate: /pomodoro quiet typed while a turn is in flight runs at once, not once the turn ends. Nothing it does
+		// depends on the turn.
 		await $.command
 			.register({
 				...COMMAND,
 				description: messages[language].description,
-				argumentHint: 'today',
+				argumentHint: 'today | quiet',
+				immediate: true,
 			})
 			.catch(() => {})
 		await begin($, settings, e.isInteractive)

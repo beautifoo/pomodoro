@@ -6,7 +6,8 @@ import { type Language, messages } from './messages'
 
 // Shared by every open session through the agent's store: one pomodoro per person, not per session. `blockStart` is when
 // the stretch of work since the last break began, `done` the pomodoros of the set before it, `lastInput` the person's
-// own, `agentAt` the main agent's last activity, and `breakStart` when the break under way began.
+// own (while quiet, the person is there until a tick sees the screen locked), `agentAt` the main agent's last activity,
+// `breakStart` when the break under way began, and `quiet` whether /pomodoro quiet is on.
 export type Timer = {
 	blockStart?: number
 	done?: number
@@ -15,6 +16,7 @@ export type Timer = {
 	lastInput?: number
 	agentAt?: number
 	breakStart?: number
+	quiet?: boolean
 }
 // The agent's summary at a check-in, kept for /pomodoro today.
 export type CheckIn = { at: number; repo: string | null; text: string }
@@ -258,6 +260,23 @@ export function createInstance(
 		}
 	}
 
+	// Quiet on or off for every session of the agent, then a tick at once: the count says so, and off, a break due alerts
+	// now, even within 5 minutes of the last alert. After a sleep the tick comes first, so the gap doesn't end quiet just
+	// turned on.
+	// ponytail: read-then-write, so a tick storing the timer in the same instant can undo it
+	async function toggleQuiet() {
+		if (isTickBehind(await host.now())) await runTick().catch(() => {})
+		const timer = ((await host.load('timer')) ?? {}) as Timer
+		const quiet = !timer.quiet
+		await host.save(
+			'timer',
+			quiet ? { ...timer, quiet } : { ...timer, quiet, alertedAt: undefined },
+		)
+		// Only where the clock runs, which is where the count shows.
+		if (cancelClock !== undefined && !isStopped) await runTick().catch(() => {})
+		return quiet ? messages[language].quietOn : messages[language].quietOff
+	}
+
 	// ponytail: read-then-write, so two sessions logging in the same instant can drop one
 	async function log(text: string) {
 		const at = await host.now()
@@ -305,6 +324,7 @@ export function createInstance(
 			feed({ type: 'turnEnded' })
 		},
 		async command(args) {
+			if (args.trim() === 'quiet') return toggleQuiet()
 			if (!['', 'today'].includes(args.trim())) return messages[language].usage
 			return today(
 				((await host.load('checkIns')) ?? []) as CheckIn[],
@@ -428,12 +448,17 @@ function tick(
 		now,
 	)
 	const { lockedSince } = state
+	// A gap is no tick for a break's length: the machine slept or no session was open. Like a break, it ends quiet.
+	const isGap = timer.seenAt === undefined || now - timer.seenAt >= SHORT_BREAK
+	const isQuiet = timer.quiet === true && !isGap
 	// The person's last input that counts, from the looks at ioreg, and the main agent's last activity; without the
 	// looks, both are the activity. Each is the latest any session has seen, so an idle session can't end the pomodoro
-	// another one is working in.
+	// another one is working in. While quiet the person is there until the screen locks: sitting still in a call is no
+	// break, however long, and only a lock held for a break's length is one.
 	const lastInput = Math.max(
 		timer.lastInput ?? 0,
 		state.lastInputThatCounts ?? state.lastActivity,
+		isQuiet ? (lockedSince ?? now) : 0,
 	)
 	const agentAt = Math.max(timer.agentAt ?? 0, state.lastActivity)
 	// Time since the person or the main agent was last there. Watching the agent holds off a break but doesn't end one:
@@ -447,7 +472,7 @@ function tick(
 
 	// The break began at the person's own last input, not the agent's. It forgets the last return: the look that counts
 	// the next one sets it again, and where another session's input ends this break first, there's none to read. The
-	// stretch before it and the set are kept for the return.
+	// stretch before it and the set are kept for the return; quiet isn't.
 	if (idle >= SHORT_BREAK)
 		return {
 			state: { ...state, due: undefined, backAt: undefined },
@@ -474,9 +499,7 @@ function tick(
 	if (idle > SHORT_BREAK - MINUTE)
 		effects.push({ type: 'wake', afterMs: SHORT_BREAK - idle + 1_000 })
 
-	// The break this tick ends, from when it began: the one found, or a gap from the person's last input before it. A gap
-	// is no tick for a break's length: the machine slept or no session was open.
-	const isGap = timer.seenAt === undefined || now - timer.seenAt >= SHORT_BREAK
+	// The break this tick ends, from when it began: the one found, or a gap from the person's last input before it.
 	const leftAt =
 		timer.breakStart ?? (isGap ? (timer.lastInput ?? timer.seenAt) : undefined)
 	let blockStart = timer.blockStart ?? now
@@ -500,7 +523,9 @@ function tick(
 	}
 	const worked = now - blockStart
 	const minutes = Math.floor(worked / MINUTE)
-	const isDue = worked >= POMODORO
+	// Once a pomodoro is up, a break is due, except while quiet: then the count goes on, but nothing asks for one, the
+	// alert, the warning or the notes to the agent.
+	const isDue = worked >= POMODORO && !isQuiet
 	// The pomodoro under way in the set, and whether the set is up: after the fourth, until a long break.
 	const position = done + Math.floor(worked / POMODORO) + 1
 	const isSetUp = position > SET
@@ -522,11 +547,12 @@ function tick(
 				alertedAt: shouldAlert ? now : alertedAt,
 				lastInput,
 				agentAt,
+				quiet: isQuiet,
 			},
 		},
 		{
 			type: 'show',
-			label: `${tomato(settings, 'pomodoro ')}${text.count(position, Math.floor((worked % POMODORO) / MINUTE))}`,
+			label: `${tomato(settings, 'pomodoro ')}${isQuiet ? `${text.quiet} · ` : ''}${text.count(position, Math.floor((worked % POMODORO) / MINUTE))}`,
 			warning: isDue
 				? `${tomato(settings)}${(isSetUp ? text.dueLong : text.due)(minutes)}`
 				: undefined,

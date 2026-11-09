@@ -20,13 +20,18 @@ export type Messages = {
 	// Back from a break: the minutes away, and the pomodoro of the set taken up again, or a new set after a long break.
 	back: (minutes: number, position: number) => string
 	backLong: (minutes: number) => string
+	// The word before the count while quiet, and what /pomodoro quiet says as it turns quiet on, and off.
+	quiet: string
+	quietOn: string
+	quietOff: string
 	// Once the check-in went out.
 	notice: string
 }
 
 const en: Messages = {
-	description: "Lists today's check-ins by repository.",
-	usage: 'Usage: /pomodoro [today]',
+	description:
+		"Lists today's check-ins by repository, or turns quiet on or off.",
+	usage: 'Usage: /pomodoro [today|quiet]',
 	noCheckIns: 'No check-ins today.',
 	noRepository: 'no repository',
 	onABreak: 'on a break',
@@ -40,6 +45,10 @@ const en: Messages = {
 	back: (minutes, position) =>
 		`Back after ${minutes}m · pomodoro ${position} of 4`,
 	backLong: (minutes) => `Back after ${minutes}m · new set, pomodoro 1 of 4`,
+	quiet: 'quiet',
+	quietOn:
+		'Quiet: no alert and no check-in, and the count goes on. It ends when you run /pomodoro quiet again, or lock the screen for 3 minutes.',
+	quietOff: 'Quiet is off.',
 	notice: 'Pomodoro: told the agent your pomodoro is up.',
 }
 

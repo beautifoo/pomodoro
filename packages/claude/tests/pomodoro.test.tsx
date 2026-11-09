@@ -28,12 +28,17 @@ const world = (
 	const status: (string | undefined)[] = []
 	const labels: string[] = []
 	const chimes: number[] = []
+	// Each command the mod registered, as it asked.
+	const registered: unknown[] = []
 	// Without an answer the kit skips the whole session.start hook.
 	on('settings.read', () => ({ value: {} }))
 	on('session.start', (_, e) => ({ cwd: e.cwd }))
 	on('prompt.submit', (_, e) => ({ text: e.text }))
 	on('tool.call', () => ({ result: {} }))
-	on('command.register', (_, e) => ({ value: { command: e.name } }))
+	on('command.register', (_, e) => {
+		registered.push(e)
+		return { value: { command: e.name } }
+	})
 	on('session.repo', () => ({
 		value: { root: '/code/app', remote: null, internal: false, name: null },
 	}))
@@ -133,6 +138,7 @@ const world = (
 		toasts,
 		toastMs,
 		chimes,
+		registered,
 		respond,
 	}
 }
@@ -162,16 +168,17 @@ const endTurn = (
 		agentId,
 	})
 
-// What /pomodoro today prints.
-const listed = async ($: Engine) =>
+// What /pomodoro prints for `args`, and for today.
+const pomodoro = async ($: Engine, args: string) =>
 	(
 		await $.command.run({
 			command: 'pomodoro',
-			args: 'today',
+			args,
 			origin: { kind: 'composer' },
 			presentation: { isFullscreen: false, columns: 80 },
 		})
 	).text
+const listed = ($: Engine) => pomodoro($, 'today')
 
 const texts = (checkIns: unknown) =>
 	(checkIns as { text: string }[]).map((c) => c.text)
@@ -242,6 +249,35 @@ test("the alert goes through the terminal's notification, and nothing else posts
 	])
 	expect(chimes.length).toBe(1)
 	expect(osascripts).toEqual([])
+})
+
+// Registered `immediate`, /pomodoro typed while a turn is in flight runs at once instead of waiting for the turn to end.
+test('/pomodoro quiet runs mid-turn, and the count shows it', async ($, on) => {
+	const { clock, notified, chimes, status, labels, registered } = world(
+		on,
+		() => 0,
+	)
+	await start($)
+	expect(registered).toEqual([
+		{
+			name: 'pomodoro',
+			description:
+				"Lists today's check-ins by repository, or turns quiet on or off.",
+			argumentHint: 'today | quiet',
+			immediate: true,
+		},
+	])
+	await clock.advance(10 * MIN)
+	expect(await pomodoro($, 'quiet')).toStartWith('Quiet: no alert')
+	expect(labels.at(-1)).toBe('🍅 quiet · 1 of 4 · 10/25m')
+
+	// No alert, chime or warning while quiet; off, the alert at once.
+	await clock.advance(20 * MIN)
+	expect([notified, chimes, status.filter(Boolean)]).toEqual([[], [], []])
+	expect(await pomodoro($, 'quiet')).toBe('Quiet is off.')
+	expect(labels.at(-1)).toBe('🍅 2 of 4 · 5/25m')
+	expect([notified.length, chimes.length]).toEqual([1, 1])
+	expect(status.at(-1)).toBe('🍅 30m, time for a break')
 })
 
 test('back from a break, a toast says so, with no banner and no chime', async ($, on) => {
