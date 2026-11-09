@@ -111,16 +111,19 @@ export const register: Register = (on, options) => {
 	})
 
 	on('prompt.submit', async (_, e, next) => {
-		await instance?.activity()
+		await instance?.activity(true)
 		return next(e)
 	})
 
-	// The check rides a tool result of the main loop: Claude reads it mid-turn, and it never waits in an idle session.
+	// A tool call counts as the main loop's activity as it starts and as it ends, not while it waits. The check rides a
+	// tool result of the main loop: Claude reads it mid-turn, and it never waits in an idle session.
 	on('tool.call', async ($, e, next) => {
-		await instance?.activity()
+		const isMain = e.agentId === undefined
+		await instance?.activity(isMain)
 		const ran = await next(e)
+		await instance?.activity(isMain)
 		if (ran.deny !== undefined) return ran
-		const checkIn = instance?.toolResult(e.agentId === undefined)
+		const checkIn = instance?.toolResult(isMain)
 		if (checkIn === undefined) return ran
 		void $.session
 			.append({
@@ -138,10 +141,12 @@ export const register: Register = (on, options) => {
 		return { ...ran, context: [...(ran.context ?? []), checkIn] }
 	})
 
-	// A response of the main loop.
+	// A response, which is activity; the main loop's may hold the summary.
 	on('turn.step', async function* (_, e, next) {
 		const response = yield* next(e)
-		if (e.agentId === undefined) await instance?.reply(response.answer)
+		const isMain = e.agentId === undefined
+		await instance?.activity(isMain)
+		if (isMain) await instance?.reply(response.answer)
 		return response
 	})
 

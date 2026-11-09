@@ -85,10 +85,17 @@ const world = (
 				},
 			}
 		const ms = idle(clock.now())
+		// The screen lock: never locked.
+		const isLock = e.argv.includes('Root')
 		return {
 			value: {
 				exitCode: ms === null ? 1 : 0,
-				stdout: ms === null ? '' : `"HIDIdleTime" = ${ms * 1e6}`,
+				stdout:
+					ms === null
+						? ''
+						: isLock
+							? '"IOConsoleLocked" = No'
+							: `"HIDIdleTime" = ${ms * 1e6}`,
 				stderr: '',
 				isStdoutTruncated: false,
 				isStderrTruncated: false,
@@ -406,6 +413,24 @@ test("ioreg's idle time is the input: 3 minutes away is a break, and steady use 
 	expect(labels.at(-1)).toBe('🍅 0/25m')
 	await clock.set(T0 + 10 * MIN)
 	expect(labels.at(-1)).toBe('🍅 9/25m')
+})
+
+test("a subagent's tool calls don't hold off a break, the main loop's do", async ($, on) => {
+	// No input since the start.
+	const { clock, labels } = world(on, (now) => now - T0)
+	await start($)
+	// The main loop's tool calls, one each 30 seconds for 5 minutes: the count runs on.
+	for (let i = 0; i < 10; i++) {
+		await clock.advance(30_000)
+		await checked($)
+	}
+	expect(labels.at(-1)).toBe('🍅 5/25m')
+	// A subagent's from then on: 3 minutes after the main loop's last, a break.
+	for (let i = 0; i < 8; i++) {
+		await clock.advance(30_000)
+		await checked($, 'a1')
+	}
+	expect(labels.at(-1)).toBe('🍅 on a break')
 })
 
 test('without ioreg, a break is a break from every session', async ($, on) => {

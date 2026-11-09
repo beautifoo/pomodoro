@@ -4,12 +4,15 @@ import { type Language, messages } from './messages'
 // (createInstance), with a host that does its I/O, and passes it the session's events; whatever only one agent does
 // stays in that agent's code (docs/adr/0001). Inside, step() is pure: it says what to do, and the instance does it.
 
-// Shared by every open session through the agent's store: one pomodoro per person, not per session.
+// Shared by every open session through the agent's store: one pomodoro per person, not per session. `lastInput` is the
+// person's own, `agentAt` the main agent's last activity, and `breakStart` when the break under way began.
 export type Timer = {
 	blockStart?: number
 	seenAt?: number
 	alertedAt?: number
 	lastInput?: number
+	agentAt?: number
+	breakStart?: number
 }
 // The agent's summary at a check-in, kept for /pomodoro today.
 export type CheckIn = { at: number; repo: string | null; text: string }
@@ -36,28 +39,29 @@ export function settingsFrom(json: unknown): Settings | { problems: string[] } {
 	return problems.length > 0 ? { problems } : (settings as Settings)
 }
 
-// One session's own: its last prompt or tool call; its last look at ioreg, and the latest input of each look that saw
+// One session's own: the main loop's last activity; its last look at ioreg, and the latest input of each look that saw
 // input in the last minute; the last input that counts (undefined: no look yet); when the person came back from the
-// latest break, by the first look of the run that made input count again; the check-in now due, the last one sent, and
-// whether the summary it asked for is still to log.
+// latest break, by the first look of the run that made input count again; since when the screen is locked, from the
+// first tick that saw it; the check-in now due, the last one sent, and whether the summary it asked for is still to log.
 type State = {
 	lastActivity: number
 	lookedAt?: number
 	looks: number[]
 	lastInputThatCounts?: number
 	backAt?: number
+	lockedSince?: number
 	due?: { key: number; text: string }
 	sentKey?: number
 	awaitingSummary: boolean
 }
 
 type Event =
-	// A prompt or a tool call.
+	// The main loop's prompt, reply, or tool call as it starts or ends.
 	| { type: 'activity'; now: number }
 	// A look at the system's input idle time, which ioreg reads.
 	| { type: 'look'; now: number; idleMs: number }
-	// The minute's tick, with the stored timer.
-	| { type: 'tick'; now: number; timer: Timer }
+	// The minute's tick, with the stored timer and whether the screen is locked.
+	| { type: 'tick'; now: number; timer: Timer; isLocked: boolean }
 	| { type: 'toolResult'; isMain: boolean }
 	// A finished response of the main loop, and the end of its turn (in Pi, the run).
 	| { type: 'reply'; text: string }
@@ -103,6 +107,10 @@ function ioregIdleMs(stdout: string) {
 	return ns === undefined ? undefined : Number(ns) / 1e6
 }
 
+// The command that says whether the screen is locked (about 24 ms), in its "IOConsoleLocked" key, which Apple doesn't
+// document.
+export const LOCK = ['ioreg', '-n', 'Root', '-d', '1']
+
 // An alert's chime (macOS).
 export const CHIME = ['afplay', '/System/Library/Sounds/Glass.aiff']
 
@@ -145,8 +153,8 @@ export type Instance = {
 	stop: () => void
 	// One tick now, as the clock would.
 	tick: () => Promise<void>
-	// A prompt or a tool call.
-	activity: () => Promise<void>
+	// A prompt, a reply, or a tool call as it starts or ends; only the main loop's is the person being there.
+	activity: (isMain: boolean) => Promise<void>
 	// The check-in to add to this tool result, if it's of the main loop and one is due: once per pomodoro.
 	toolResult: (isMain: boolean) => string | undefined
 	// A finished response of the main loop, which may hold the summary.
@@ -176,6 +184,9 @@ export function createInstance(
 	let cancelLooks: (() => void) | undefined
 	let cancelWake: (() => void) | undefined
 	let isStopped = false
+	// When the last tick began. A sleeping Mac stops the clock's timers, so the first activity after it wakes can come
+	// before the first tick.
+	let lastTickAt = 0
 
 	// Moves the rhythm on by one event, and returns what to carry out, in order.
 	function feed(event: Event) {
@@ -199,17 +210,21 @@ export function createInstance(
 	}
 
 	async function runTick() {
+		lastTickAt = await host.now()
 		// A tick on its own (the clock never started) or with the looks behind takes one first; over SSH ioreg would see
 		// the console's input.
 		const { lookedAt } = state
-		if (
-			!remote &&
-			(lookedAt === undefined || (await host.now()) - lookedAt > LOOK)
-		)
+		if (!remote && (lookedAt === undefined || lastTickAt - lookedAt > LOOK))
 			await look()
+		// Only where a look read ioreg (macOS, not over SSH); nothing from it is unlocked.
+		const isLocked =
+			state.lookedAt !== undefined &&
+			(await host.run(LOCK, 5_000).catch(() => '')).includes(
+				'"IOConsoleLocked" = Yes',
+			)
 		const now = await host.now()
 		const timer = ((await host.load('timer')) ?? {}) as Timer
-		for (const effect of feed({ type: 'tick', now, timer })) {
+		for (const effect of feed({ type: 'tick', now, timer, isLocked })) {
 			// A tick still under way when the instance stopped carries out nothing more: its session is gone.
 			if (isStopped) return
 			// Each wake aims at the moment the stretch without input becomes a break, so the newest replaces the last.
@@ -254,8 +269,17 @@ export function createInstance(
 			cancelWake?.()
 		},
 		tick: runTick,
-		async activity() {
-			feed({ type: 'activity', now: await host.now() })
+		async activity(isMain) {
+			const now = await host.now()
+			// After a sleep the tick comes first, so a check-in due before it isn't sent.
+			if (
+				cancelClock !== undefined &&
+				!isStopped &&
+				now - lastTickAt >= SHORT_BREAK
+			)
+				await runTick().catch(() => {})
+			// A subagent's work isn't the person being there.
+			if (isMain) feed({ type: 'activity', now })
 		},
 		toolResult(isMain) {
 			const [checkIn] = feed({ type: 'toolResult', isMain })
@@ -330,6 +354,9 @@ function looked(state: State, now: number, idleMs: number): State {
 	// The first look counts at once: the input before the instance started, so a reload doesn't end a break.
 	if (state.lookedAt === undefined || state.lastInputThatCounts === undefined)
 		return { ...state, lookedAt: now, lastInputThatCounts: latest }
+	// Input under the lock screen (the password, a jiggler) never counts, nor adds to the input after it.
+	if (state.lockedSince !== undefined)
+		return { ...state, lookedAt: now, looks: [] }
 	const sawInput = latest > state.lookedAt
 	const looks = [
 		...state.looks.filter((at) => now - at < MINUTE),
@@ -350,24 +377,44 @@ function looked(state: State, now: number, idleMs: number): State {
 
 function tick(
 	state: State,
-	{ now, timer }: Extract<Event, { type: 'tick' }>,
+	{ now, timer, isLocked }: Extract<Event, { type: 'tick' }>,
 	settings: Settings,
 	language: Language,
 ): { state: State; effects: Effect[] } {
 	const text = messages[language]
-	// Time since input that counts, from the looks at ioreg; without them, since this session's last activity.
-	const idleMs = now - (state.lastInputThatCounts ?? state.lastActivity)
-	// The latest input any session has seen, so an idle session can't end the pomodoro another one is working in.
-	const lastInput = Math.max(timer.lastInput ?? 0, now - idleMs)
-	const idle = now - lastInput
+	const lockedSince = isLocked ? (state.lockedSince ?? now) : undefined
+	// The person's last input that counts, from the looks at ioreg, and the main agent's last activity; without the
+	// looks, both are the activity. Each is the latest any session has seen, so an idle session can't end the pomodoro
+	// another one is working in.
+	const lastInput = Math.max(
+		timer.lastInput ?? 0,
+		state.lastInputThatCounts ?? state.lastActivity,
+	)
+	const agentAt = Math.max(timer.agentAt ?? 0, state.lastActivity)
+	// Time since the person or the main agent was last there. Watching the agent holds off a break but doesn't end one:
+	// only the person's own input does. A lock starts the time away at once.
+	const idle =
+		now -
+		Math.min(
+			timer.breakStart === undefined ? Math.max(lastInput, agentAt) : lastInput,
+			lockedSince ?? Number.POSITIVE_INFINITY,
+		)
 
-	// A break forgets the last return: the look that counts the next one sets it again, and where another session's input
-	// ends this break first, there's none to read.
+	// The break began at the person's own last input, not the agent's. It forgets the last return: the look that counts
+	// the next one sets it again, and where another session's input ends this break first, there's none to read.
 	if (idle >= SHORT_BREAK)
 		return {
-			state: { ...state, due: undefined, backAt: undefined },
+			state: { ...state, lockedSince, due: undefined, backAt: undefined },
 			effects: [
-				{ type: 'persist', timer: { seenAt: now, lastInput } },
+				{
+					type: 'persist',
+					timer: {
+						seenAt: now,
+						lastInput,
+						agentAt,
+						breakStart: timer.breakStart ?? lastInput,
+					},
+				},
 				{
 					type: 'show',
 					label: `${tomato(settings, 'pomodoro ')}${text.onABreak}`,
@@ -387,10 +434,11 @@ function tick(
 	const minutes = Math.floor(worked / MINUTE)
 	const isDue = worked >= POMODORO
 	const alertedAt = timer.alertedAt ?? 0
-	// Not once the person has been away a while: that may be the break already under way.
+	// Not once the person has been away a while, nor while the screen is locked: that may be the break already under way.
 	const shouldAlert =
 		isDue &&
 		idle < AWAY &&
+		lockedSince === undefined &&
 		(alertedAt < blockStart || now - alertedAt >= REPEAT)
 
 	effects.push(
@@ -401,6 +449,7 @@ function tick(
 				seenAt: now,
 				alertedAt: shouldAlert ? now : alertedAt,
 				lastInput,
+				agentAt,
 			},
 		},
 		{
@@ -425,7 +474,7 @@ function tick(
 				text: check(minutes),
 			}
 		: undefined
-	return { state: { ...state, due }, effects }
+	return { state: { ...state, lockedSince, due }, effects }
 }
 
 // The check-in rides a tool result of the main loop, once per pomodoro. It counts as sent from here, so two tool

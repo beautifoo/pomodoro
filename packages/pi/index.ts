@@ -133,13 +133,20 @@ export default function (pi: ExtensionAPI) {
 	})
 
 	pi.on('input', async () => {
-		await instance?.activity()
+		await instance?.activity(true)
+	})
+
+	// A tool call counts as the agent's activity as it starts and as it ends, not while it waits; one another tool made
+	// doesn't.
+	pi.on('tool_call', async (e) => {
+		await instance?.activity(e.parentToolCallId === undefined)
 	})
 
 	// The check rides a tool result of the agent's own: it reads it mid-run, and it never waits in an idle session.
 	pi.on('tool_result', async (e, ctx) => {
-		await instance?.activity()
-		const checkIn = instance?.toolResult(e.parentToolCallId === undefined)
+		const isMain = e.parentToolCallId === undefined
+		await instance?.activity(isMain)
+		const checkIn = instance?.toolResult(isMain)
 		if (checkIn === undefined) return
 		ctx.ui.notify(notice(settings, language), 'info')
 		// Replacing the content drops the structured content unless it comes back too.
@@ -149,16 +156,13 @@ export default function (pi: ExtensionAPI) {
 		}
 	})
 
-	// A finished response of the agent's. One cut short (an error, Escape, the length limit) ends here too, with its
-	// partial text: it's not a reply, as a retry may finish it.
+	// A response of the agent's, which is activity. One cut short (an error, Escape, the length limit) ends here too, with
+	// its partial text: it's not a reply, as a retry may finish it.
 	pi.on('message_end', async (e) => {
 		const { message } = e
-		if (
-			!('role' in message) ||
-			message.role !== 'assistant' ||
-			!['stop', 'toolUse'].includes(message.stopReason)
-		)
-			return
+		if (!('role' in message) || message.role !== 'assistant') return
+		await instance?.activity(true)
+		if (!['stop', 'toolUse'].includes(message.stopReason)) return
 		await instance?.reply(
 			message.content
 				.map((part) => (part.type === 'text' ? part.text : ''))

@@ -8,21 +8,28 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { CHIME, type CheckIn, IOREG, MINUTE, type Timer } from '../lib/core'
+import {
+	CHIME,
+	type CheckIn,
+	IOREG,
+	LOCK,
+	MINUTE,
+	type Timer,
+} from '../lib/core'
 
 const pi = resolve('packages/pi/node_modules/@earendil-works/pi-coding-agent')
 const { version, bin } = await Bun.file(`${pi}/package.json`).json()
 
 // Stand-ins for ioreg, afplay and osascript, first on Pi's PATH: each records its arguments, and ioreg takes a second,
-// as the real one can, then reports no idle time. So every machine runs the same test, a tick Pi doesn't wait for
-// loses the race to the first tool result, and nothing shows or plays.
+// as the real one can, then reports no idle time and an unlocked screen. So every machine runs the same test, a tick Pi
+// doesn't wait for loses the race to the first tool result, and nothing shows or plays.
 const fakes = await mkdtemp(join(tmpdir(), 'pi-smoke-fakes-'))
 for (const name of ['ioreg', 'afplay', 'osascript'])
 	await writeFile(
 		join(fakes, name),
 		`#!/usr/bin/env node
 require('node:fs').appendFileSync(process.env.POMODORO_SMOKE_CALLS, JSON.stringify(['${name}', ...process.argv.slice(2)]) + '\\n')
-if ('${name}' === 'ioreg') setTimeout(() => console.log('"HIDIdleTime" = 0'), 1_000)
+if ('${name}' === 'ioreg') setTimeout(() => console.log('"HIDIdleTime" = 0\\n"IOConsoleLocked" = No'), 1_000)
 `,
 		{ mode: 0o755 },
 	)
@@ -229,7 +236,7 @@ for (const [settings, expected, what] of [
 			ticked: true,
 			alerted: true,
 			logged: ['Pomodoro: wrote a.txt and b.txt.'],
-			calls: [IOREG, CHIME],
+			calls: [IOREG, LOCK, CHIME],
 			crashed: false,
 		},
 		'came due with a tick that alerted, rode the first tool result, reached the model once, and its summary was logged',
@@ -243,7 +250,7 @@ for (const [settings, expected, what] of [
 			ticked: true,
 			alerted: false,
 			logged: ['Pomodoro: wrote a.txt and b.txt.'],
-			calls: [IOREG],
+			calls: [IOREG, LOCK],
 			crashed: false,
 		},
 		"wasn't given again in a run that continued the session that got it",
@@ -256,7 +263,7 @@ for (const [settings, expected, what] of [
 			ticked: true,
 			alerted: true,
 			logged: ['Pomodoro: wrote a.txt and b.txt.'],
-			calls: [IOREG, CHIME],
+			calls: [IOREG, LOCK, CHIME],
 			crashed: false,
 		},
 		'ran with a setting of an older version in its file',

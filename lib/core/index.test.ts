@@ -6,10 +6,12 @@ import {
 	createInstance,
 	DEFAULTS,
 	type Host,
+	LOCK,
 	MINUTE,
 	type Settings,
 	settingsFrom,
 	step,
+	type Timer,
 } from './index'
 
 const T0 = 1_700_000_000_000
@@ -49,13 +51,15 @@ test('settingsFrom names every value of the wrong kind, takes an empty one as le
 type Pending = { at: number; every?: number; fn: () => void }
 
 // An agent in memory: a clock at T0, the store (open to the test, which ages it to stand for a stretch with no tick),
-// ioreg reporting `idle(now)` (null: no ioreg), a repository at /code/app, the agent's own alert, and what the host was
-// asked to do.
+// ioreg reporting `idle(now)` (null: no ioreg) and whether the screen is `locked(now)`, a repository at /code/app, the
+// agent's own alert, and what the host was asked to do.
 function world({
 	idle = () => 0,
+	locked = () => false,
 	seed = {},
 }: {
 	idle?: (now: number) => number | null
+	locked?: (now: number) => boolean
 	seed?: Record<string, unknown>
 } = {}) {
 	let now = T0
@@ -84,6 +88,8 @@ function world({
 			const ms = idle(now)
 			if (ms === null) throw new Error('no ioreg')
 			// Indented, as ioreg prints it.
+			if (argv.join(' ') === LOCK.join(' '))
+				return `  |   "IOConsoleLocked" = ${locked(now) ? 'Yes' : 'No'}\n`
 			return `    |   "HIDIdleTime" = ${ms * 1e6}\n`
 		},
 		repo: async () => '/code/app',
@@ -130,6 +136,11 @@ function world({
 		set,
 		advance: (ms: number) => set(now + ms),
 		settle: () => set(now),
+		// A sleeping Mac: the clock moves on, and every timer with it, firing nothing.
+		sleep: (ms: number) => {
+			now += ms
+			for (const pending of timers) pending.at += ms
+		},
 		pending: () => timers.size,
 		label: () => shows.at(-1)?.label,
 	}
@@ -307,7 +318,7 @@ test('over SSH ioreg never runs: activity stands in, and 3 minutes without it is
 	const w = world()
 	const pomodoro = start(w, {}, { remote: true })
 	await w.settle()
-	await pomodoro.activity()
+	await pomodoro.activity(true)
 	await w.advance(3 * MINUTE)
 	expect(w.runs).toEqual([])
 	// No activity before the first tick: nothing to say the person was there.
@@ -529,7 +540,8 @@ test('a break forgets when the person came back from the last one', () => {
 	}
 	// Input that counts to 30 seconds in, then a break.
 	const look = (at: number) => ({ type: 'look', now: at, idleMs: 0 }) as const
-	const tick = (at: number) => ({ type: 'tick', now: at, timer: {} }) as const
+	const tick = (at: number) =>
+		({ type: 'tick', now: at, timer: {}, isLocked: false }) as const
 	feed(...[0, 10, 20, 30].map((s) => look(T0 + s * 1_000)))
 	feed(tick(T0 + 3.5 * MINUTE))
 	expect(state.backAt).toBeUndefined()
@@ -576,7 +588,7 @@ test('without ioreg, a break is a break from every session', async () => {
 	expect(w.label()).toBe('🍅 20/25m')
 
 	for (let i = 0; i < 5; i++) {
-		await pomodoro.activity()
+		await pomodoro.activity(true)
 		await w.advance(MINUTE)
 	}
 	expect(w.notified.length).toBe(1)
@@ -586,4 +598,152 @@ test('without ioreg, a break is a break from every session', async () => {
 	expect(w.label()).toBe('🍅 26/25m')
 	await w.advance(MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
+})
+
+test('no alert while the screen is locked', async () => {
+	const lockedAt = T0 + 24 * MINUTE + 30_000
+	const w = world({
+		idle: inputs(steady(T0, lockedAt)),
+		locked: (now) => now >= lockedAt,
+	})
+	start(w)
+	await w.set(T0 + 27 * MINUTE)
+	expect(w.notified).toEqual([])
+})
+
+test('a short lock is nothing, a lock of 3 minutes is a break', async () => {
+	// Locked from 10:00 to 10:40, in use around it, and locked again from 12:00.
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 10 * MINUTE),
+			...steady(T0 + 10 * MINUTE + 40_000, T0 + 12 * MINUTE),
+		]),
+		locked: (now) =>
+			(now >= T0 + 10 * MINUTE && now < T0 + 10 * MINUTE + 40_000) ||
+			now >= T0 + 12 * MINUTE,
+	})
+	start(w)
+	await w.set(T0 + 12 * MINUTE)
+	expect(w.label()).toBe('🍅 12/25m')
+	await w.set(T0 + 15 * MINUTE + 30_000)
+	expect(w.label()).toBe('🍅 on a break')
+})
+
+test("typing the password after a lock doesn't end the break", async () => {
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 10 * MINUTE),
+			...[51, 52, 53, 54, 55].map((s) => T0 + 14 * MINUTE + s * 1_000),
+		]),
+		locked: (now) => now >= T0 + 10 * MINUTE && now < T0 + 14 * MINUTE + 50_000,
+	})
+	start(w)
+	await w.set(T0 + 16 * MINUTE)
+	expect(w.label()).toBe('🍅 on a break')
+})
+
+// Under the lock screen the main agent may still work, and keys (a fumbled password, a jiggler) still reach ioreg.
+test("while the screen is locked, neither input nor the main agent's work holds off a break or ends one", async () => {
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 10 * MINUTE),
+			...steady(T0 + 13 * MINUTE + 30_000, T0 + 14 * MINUTE),
+		]),
+		locked: (now) => now >= T0 + 10 * MINUTE && now < T0 + 15 * MINUTE,
+	})
+	const pomodoro = start(w)
+	for (let at = T0 + 10 * MINUTE; at <= T0 + 15 * MINUTE; at += 30_000) {
+		await w.set(at)
+		await pomodoro.activity(true)
+	}
+	expect(w.label()).toBe('🍅 on a break')
+})
+
+test("a check-in due before the Mac slept isn't sent after it wakes", async () => {
+	const w = world()
+	const pomodoro = start(w)
+	await w.set(T0 + 26 * MINUTE)
+	expect(w.shows.at(-1)?.warning).toBe('🍅 26m, time for a break')
+	// Asleep for an hour: on waking, a tool call comes before the minute's tick.
+	w.sleep(60 * MINUTE)
+	await pomodoro.activity(true)
+	expect(pomodoro.toolResult(true)).toBeUndefined()
+	expect(w.label()).toBe('🍅 on a break')
+})
+
+test('watching the main agent work is no break', async () => {
+	const w = world({ idle: inputs(steady(T0, T0 + 10 * MINUTE)) })
+	const pomodoro = start(w)
+	for (let at = T0 + 12 * MINUTE; at <= T0 + 30 * MINUTE; at += 2 * MINUTE) {
+		await w.set(at)
+		await pomodoro.activity(true)
+	}
+	expect(w.shows.map((show) => show.label)).not.toContain('🍅 on a break')
+	expect(w.label()).toBe('🍅 30/25m')
+	expect(w.notified[0]).toStartWith('🍅 25 minutes without a break.')
+})
+
+test("a subagent's work is no presence", async () => {
+	const w = world({ idle: inputs(steady(T0, T0 + 10 * MINUTE)) })
+	const pomodoro = start(w)
+	for (
+		let at = T0 + 10 * MINUTE;
+		at <= T0 + 13 * MINUTE + 30_000;
+		at += 30_000
+	) {
+		await w.set(at)
+		await pomodoro.activity(false)
+	}
+	expect(w.label()).toBe('🍅 on a break')
+})
+
+test('3 minutes with nothing from the person or the main agent is a break, mid-turn too', async () => {
+	const w = world({ idle: inputs(steady(T0, T0 + 10 * MINUTE)) })
+	const pomodoro = start(w)
+	await w.set(T0 + 12 * MINUTE)
+	await pomodoro.activity(true)
+	await w.set(T0 + 14 * MINUTE + 59_000)
+	expect(w.label()).toBe('🍅 14/25m')
+	await w.set(T0 + 15 * MINUTE + 30_000)
+	expect(w.label()).toBe('🍅 on a break')
+})
+
+test("a break's length counts from the person's own last input", async () => {
+	// In use to 10 minutes in, watching the main agent to 20, and back at 32: 22 minutes away.
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 10 * MINUTE),
+			...steady(T0 + 32 * MINUTE, T0 + 35 * MINUTE),
+		]),
+	})
+	const pomodoro = start(w)
+	for (let at = T0 + 11 * MINUTE; at <= T0 + 20 * MINUTE; at += MINUTE) {
+		await w.set(at)
+		await pomodoro.activity(true)
+	}
+	await w.set(T0 + 22 * MINUTE + 59_000)
+	expect(w.label()).toBe('🍅 22/25m')
+	await w.set(T0 + 32 * MINUTE)
+	expect(w.label()).toBe('🍅 on a break')
+	expect((w.store.timer as Timer).breakStart).toBe(T0 + 10 * MINUTE)
+	await w.set(T0 + 33 * MINUTE)
+	expect(w.label()).toBe('🍅 0/25m')
+})
+
+// A reload's first look counts at once, a stray key 5 minutes ago too: the break goes on from when it began.
+test('a break keeps its start through a reload', async () => {
+	const w = world({
+		idle: inputs([T0 - 20 * MINUTE, T0 - 5 * MINUTE]),
+		seed: {
+			timer: {
+				seenAt: T0 - 30_000,
+				lastInput: T0 - 20 * MINUTE,
+				breakStart: T0 - 20 * MINUTE,
+			},
+		},
+	})
+	start(w)
+	await w.settle()
+	expect(w.label()).toBe('🍅 on a break')
+	expect((w.store.timer as Timer).breakStart).toBe(T0 - 20 * MINUTE)
 })
