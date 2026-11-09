@@ -4,10 +4,12 @@ import { type Language, messages } from './messages'
 // (createInstance), with a host that does its I/O, and passes it the session's events; whatever only one agent does
 // stays in that agent's code (docs/adr/0001). Inside, step() is pure: it says what to do, and the instance does it.
 
-// Shared by every open session through the agent's store: one pomodoro per person, not per session. `lastInput` is the
-// person's own, `agentAt` the main agent's last activity, and `breakStart` when the break under way began.
+// Shared by every open session through the agent's store: one pomodoro per person, not per session. `blockStart` is when
+// the stretch of work since the last break began, `done` the pomodoros of the set before it, `lastInput` the person's
+// own, `agentAt` the main agent's last activity, and `breakStart` when the break under way began.
 export type Timer = {
 	blockStart?: number
+	done?: number
 	seenAt?: number
 	alertedAt?: number
 	lastInput?: number
@@ -83,9 +85,12 @@ type Effect =
 
 export const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
-// A pomodoro; the time away that makes a break; how often the alert repeats; the time away after which it's skipped.
+// A pomodoro; the time away that makes a break, and a long one; the pomodoros of a set; how often the alert repeats; the
+// time away after which it's skipped.
 const POMODORO = 25 * MINUTE
 const SHORT_BREAK = 3 * MINUTE
+const LONG_BREAK = 15 * MINUTE
+const SET = 4
 const REPEAT = 5 * MINUTE
 const AWAY = 2 * MINUTE
 // How often the instance looks at the input idle time, and how many looks within a minute must see input for it to
@@ -306,11 +311,15 @@ export function createInstance(
 	}
 }
 
-// Whether to sum up, and when, is the agent's call: nothing stops it or asks the person anything.
-const check = (minutes: number) =>
+// Whether to sum up, and when, is the agent's call: nothing stops it or asks the person anything. At the end of a set,
+// the long break.
+const check = (minutes: number, isSetUp: boolean) =>
 	`[Pomodoro] The user has been working for ${minutes} minutes without a break. Carry on with the task. ` +
 	'If it would help them, include in your next reply a short summary of the session so far, and whether it still ' +
-	'serves the original goal, in a paragraph that starts with "Pomodoro:". Remind them to take a break.'
+	'serves the original goal, in a paragraph that starts with "Pomodoro:". ' +
+	(isSetUp
+		? "Remind them to take a 15 to 30 minute break: that's 4 pomodoros."
+		: 'Remind them to take a break.')
 
 // 🍅 before a line, unless the setting turns it off; `word` stands in where the line needs a name to make sense.
 const tomato = (settings: Settings, word = '') =>
@@ -433,7 +442,8 @@ function tick(
 		)
 
 	// The break began at the person's own last input, not the agent's. It forgets the last return: the look that counts
-	// the next one sets it again, and where another session's input ends this break first, there's none to read.
+	// the next one sets it again, and where another session's input ends this break first, there's none to read. The
+	// stretch before it and the set are kept for the return.
 	if (idle >= SHORT_BREAK)
 		return {
 			state: { ...state, due: undefined, backAt: undefined },
@@ -441,6 +451,8 @@ function tick(
 				{
 					type: 'persist',
 					timer: {
+						blockStart: timer.blockStart,
+						done: timer.done,
 						seenAt: now,
 						lastInput,
 						agentAt,
@@ -458,13 +470,35 @@ function tick(
 	if (idle > SHORT_BREAK - MINUTE)
 		effects.push({ type: 'wake', afterMs: SHORT_BREAK - idle + 1_000 })
 
-	// No tick for a break's length: the machine slept or no session was open.
+	// The break this tick ends, from when it began: the one found, or a gap from the person's last input before it. A gap
+	// is no tick for a break's length: the machine slept or no session was open.
 	const isGap = timer.seenAt === undefined || now - timer.seenAt >= SHORT_BREAK
-	const blockStart =
-		isGap || timer.blockStart === undefined ? now : timer.blockStart
+	const leftAt =
+		timer.breakStart ?? (isGap ? (timer.lastInput ?? timer.seenAt) : undefined)
+	let blockStart = timer.blockStart ?? now
+	let done = timer.done ?? 0
+	if (leftAt !== undefined) {
+		// Back at the first input of the run that counted again. Not a look from before the break began, which was stray
+		// input; without one (no looks, or another session's input ended the break), at the person's latest presence.
+		const backAt =
+			state.backAt !== undefined && state.backAt >= leftAt
+				? state.backAt
+				: now - idle
+		// The pomodoros up before the break count, one cut short doesn't; a long break starts a new set. A break that began
+		// before any activity (at 0, off macOS) began long ago.
+		const away = Math.max(0, backAt - leftAt)
+		done =
+			away >= LONG_BREAK
+				? 0
+				: done + Math.floor(Math.max(0, leftAt - blockStart) / POMODORO)
+		blockStart = backAt
+	}
 	const worked = now - blockStart
 	const minutes = Math.floor(worked / MINUTE)
 	const isDue = worked >= POMODORO
+	// The pomodoro under way in the set, and whether the set is up: after the fourth, until a long break.
+	const position = done + Math.floor(worked / POMODORO) + 1
+	const isSetUp = position > SET
 	const alertedAt = timer.alertedAt ?? 0
 	// Not once the person has been away a while, nor while the screen is locked: that may be the break already under way.
 	const shouldAlert =
@@ -478,6 +512,7 @@ function tick(
 			type: 'persist',
 			timer: {
 				blockStart,
+				done,
 				seenAt: now,
 				alertedAt: shouldAlert ? now : alertedAt,
 				lastInput,
@@ -486,16 +521,16 @@ function tick(
 		},
 		{
 			type: 'show',
-			label: `${tomato(settings, 'pomodoro ')}${text.count(minutes, POMODORO / MINUTE)}`,
+			label: `${tomato(settings, 'pomodoro ')}${text.count(position, Math.floor((worked % POMODORO) / MINUTE))}`,
 			warning: isDue
-				? `${tomato(settings)}${text.warning(minutes)}`
+				? `${tomato(settings)}${(isSetUp ? text.dueLong : text.due)(minutes)}`
 				: undefined,
 		},
 	)
 	if (shouldAlert)
 		effects.push({
 			type: 'alert',
-			text: text.alert(minutes, SHORT_BREAK / MINUTE),
+			text: (isSetUp ? text.alertLong : text.alert)(minutes),
 			mark: tomato(settings),
 			sound: settings.sound,
 		})
@@ -503,7 +538,7 @@ function tick(
 	const due = isDue
 		? {
 				key: blockStart + Math.floor(worked / POMODORO) * POMODORO,
-				text: check(minutes),
+				text: check(minutes, isSetUp),
 			}
 		: undefined
 	return { state: { ...state, due }, effects }

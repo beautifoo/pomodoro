@@ -8,11 +8,15 @@ export type Messages = {
 	usage: string
 	noCheckIns: string
 	noRepository: string
-	// The label while on a break, the count (minutes of the pomodoro's length), and the warning once it's up.
+	// The label while on a break; the count, of the pomodoro under way in the set of 4 and the minutes into it; the
+	// warning once a pomodoro is up, and the alert, each with the minutes since the last break, asking for the long break
+	// at the end of a set.
 	onABreak: string
-	count: (minutes: number, workMinutes: number) => string
-	warning: (minutes: number) => string
-	alert: (minutes: number, breakMinutes: number) => string
+	count: (position: number, minutes: number) => string
+	due: (minutes: number) => string
+	dueLong: (minutes: number) => string
+	alert: (minutes: number) => string
+	alertLong: (minutes: number) => string
 	// Once the check-in went out.
 	notice: string
 }
@@ -23,10 +27,13 @@ const en: Messages = {
 	noCheckIns: 'No check-ins today.',
 	noRepository: 'no repository',
 	onABreak: 'on a break',
-	count: (minutes, workMinutes) => `${minutes}/${workMinutes}m`,
-	warning: (minutes) => `${minutes}m, time for a break`,
-	alert: (minutes, breakMinutes) =>
-		`${minutes} minutes without a break. Stand up and look away from the screen for ${breakMinutes}.`,
+	count: (position, minutes) => `${position} of 4 · ${minutes}/25m`,
+	due: (minutes) => `${minutes}m, time for a break`,
+	dueLong: (minutes) => `${minutes}m, time for a long break`,
+	alert: (minutes) =>
+		`${minutes} minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.`,
+	alertLong: (minutes) =>
+		`${minutes} minutes without a break. That's 4 pomodoros: take a 15 to 30 minute break.`,
 	notice: 'Pomodoro: told the agent your pomodoro is up.',
 }
 

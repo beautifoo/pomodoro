@@ -189,11 +189,11 @@ test('the count is a mode label in the prompt footer', async ($, on) => {
 		props: { modes: ['focus'] },
 	})
 	expect((await ui.find({ type: 'Text', text: /🍅/ }))?.text).toBe(
-		'focus & 🍅 0/25m',
+		'focus & 🍅 1 of 4 · 0/25m',
 	)
 	await clock.advance(MIN)
 	expect((await ui.find({ type: 'Text', text: /🍅/ }))?.text).toBe(
-		'focus & 🍅 1/25m',
+		'focus & 🍅 1 of 4 · 1/25m',
 	)
 	await ui.unmount()
 })
@@ -234,7 +234,7 @@ test("the alert goes through the terminal's notification, and nothing else posts
 	await start($)
 	await clock.advance(25 * MIN)
 	expect(notified).toEqual([
-		'25 minutes without a break. Stand up and look away from the screen for 3.',
+		'25 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
 	])
 	expect(chimes.length).toBe(1)
 	expect(osascripts).toEqual([])
@@ -268,7 +268,7 @@ test('the check-in rides the next tool result, once per pomodoro, and never wait
 	expect(labels.at(-1)).toBe('🍅 on a break')
 	leftAt = Infinity
 	await clock.advance(MIN)
-	expect(labels.at(-1)).toBe('🍅 0/25m')
+	expect(labels.at(-1)).toBe('🍅 3 of 4 · 0/25m')
 	expect(await checked($)).toBe(false)
 })
 
@@ -325,7 +325,7 @@ test(
 		const { clock, labels } = world(on, () => 0)
 		await start($)
 		await clock.settle()
-		expect(labels.at(-1)).toBe('🍅 0/25m')
+		expect(labels.at(-1)).toBe('🍅 1 of 4 · 0/25m')
 	},
 )
 
@@ -336,12 +336,12 @@ test(
 		const { clock, session, status, labels, toasts } = world(on, () => 0)
 		await start($)
 		await clock.settle()
-		expect(labels.at(-1)).toBe('pomodoro 0/25m')
+		expect(labels.at(-1)).toBe('pomodoro 1 of 4 · 0/25m')
 
 		await clock.advance(25 * MIN)
 		expect(status.at(-1)).toBe('25m, time for a break')
 		expect(toasts).toEqual([
-			'25 minutes without a break. Stand up and look away from the screen for 3.',
+			'25 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
 		])
 		expect(await checked($)).toBe(true)
 		expect(JSON.stringify(session.appended())).toContain(
@@ -410,9 +410,9 @@ test("ioreg's idle time is the input: 3 minutes away is a break, and steady use 
 	// Back at the keyboard.
 	leftAt = Infinity
 	await clock.set(T0 + MIN)
-	expect(labels.at(-1)).toBe('🍅 0/25m')
+	expect(labels.at(-1)).toBe('🍅 1 of 4 · 0/25m')
 	await clock.set(T0 + 10 * MIN)
-	expect(labels.at(-1)).toBe('🍅 9/25m')
+	expect(labels.at(-1)).toBe('🍅 1 of 4 · 9/25m')
 })
 
 test("a subagent's tool calls don't hold off a break, the main loop's do", async ($, on) => {
@@ -424,7 +424,7 @@ test("a subagent's tool calls don't hold off a break, the main loop's do", async
 		await clock.advance(30_000)
 		await checked($)
 	}
-	expect(labels.at(-1)).toBe('🍅 5/25m')
+	expect(labels.at(-1)).toBe('🍅 1 of 4 · 5/25m')
 	// A subagent's from then on: 3 minutes after the main loop's last, a break.
 	for (let i = 0; i < 8; i++) {
 		await clock.advance(30_000)
@@ -444,8 +444,9 @@ test("the person's own prompt ends a break", async ($, on) => {
 		wait: false,
 		origin: { kind: 'composer' },
 	})
+	// Back at the prompt.
 	await clock.advance(MIN)
-	expect(labels.at(-1)).toBe('🍅 0/25m')
+	expect(labels.at(-1)).toBe('🍅 1 of 4 · 1/25m')
 })
 
 test('without ioreg, a break is a break from every session', async ($, on) => {
@@ -459,7 +460,7 @@ test('without ioreg, a break is a break from every session', async ($, on) => {
 	})
 	await start($)
 	await clock.settle()
-	expect(labels.at(-1)).toBe('🍅 20/25m')
+	expect(labels.at(-1)).toBe('🍅 1 of 4 · 20/25m')
 
 	// Prompts, then tool calls, stand in for input: one a minute until the alert, then until the next.
 	for (let i = 0; i < 5; i++) {

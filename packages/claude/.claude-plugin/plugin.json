@@ -14,7 +14,7 @@
 		"emoji": {
 			"type": "boolean",
 			"title": "Tomato emoji",
-			"description": "Show 🍅 in the count, the status line, the toasts and the transcript note. Off, the footer count reads 'pomodoro 12/25m'.",
+			"description": "Show 🍅 in the count, the status line, the toasts and the transcript note. Off, the footer count reads 'pomodoro 3 of 4 · 12/25m'.",
 			"default": true
 		}
 	}

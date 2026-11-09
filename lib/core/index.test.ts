@@ -185,20 +185,20 @@ async function checkedIn(w: World) {
 	return pomodoro
 }
 
-test('alerts when a pomodoro is up, then every break length while there is no break', async () => {
+test('alerts when a pomodoro is up, then every 5 minutes while there is no break', async () => {
 	const w = world()
 	start(w)
 	await w.advance(24 * MINUTE)
 	expect(w.notified).toEqual([])
 	await w.advance(MINUTE)
 	expect(w.shows.at(-1)).toEqual({
-		label: '🍅 25/25m',
+		label: '🍅 2 of 4 · 0/25m',
 		warning: '🍅 25m, time for a break',
 	})
 	await w.advance(5 * MINUTE)
 	expect(w.notified).toEqual([
-		'🍅 25 minutes without a break. Stand up and look away from the screen for 3.',
-		'🍅 30 minutes without a break. Stand up and look away from the screen for 3.',
+		'🍅 25 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
+		'🍅 30 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
 	])
 	// Ghostty shows the banner of the tab in front for a few seconds only, and a Focus silences it: each alert also chimes.
 	expect(sounds(w)).toEqual([CHIME, CHIME])
@@ -218,13 +218,17 @@ test('a closed lid clears the status line: the pomodoro that starts on waking is
 	await w.advance(25 * MINUTE)
 	expect(w.shows.at(-1)?.warning).toBe('🍅 25m, time for a break')
 
-	// Asleep for 10 minutes, so no tick ran, and the keyboard was touched on waking.
+	// Asleep for 10 minutes, so no tick ran, and the keyboard was touched on waking. The last input the timer holds, from
+	// the tick at 25, is 10 seconds short of the pomodoro, which doesn't count.
 	w.store.timer = {
 		...(w.store.timer as object),
 		seenAt: w.now() - 10 * MINUTE,
 	}
 	await w.advance(MINUTE)
-	expect(w.shows.at(-1)).toEqual({ label: '🍅 0/25m', warning: undefined })
+	expect(w.shows.at(-1)).toEqual({
+		label: '🍅 1 of 4 · 0/25m',
+		warning: undefined,
+	})
 })
 
 test('a break of just 3 minutes counts, and no alert comes during it', async () => {
@@ -241,9 +245,9 @@ test('a break of just 3 minutes counts, and no alert comes during it', async () 
 	expect(w.label()).toBe('🍅 on a break')
 	expect(w.notified.length).toBe(1)
 
-	// Back at work: a fresh pomodoro, alerting 25 minutes after its first tick.
+	// Back at work: the second pomodoro of the set, alerting 25 minutes after the return.
 	await w.set(T0 + 29 * MINUTE)
-	expect(w.label()).toBe('🍅 0/25m')
+	expect(w.label()).toBe('🍅 2 of 4 · 0/25m')
 	await w.advance(24 * MINUTE)
 	expect(w.notified.length).toBe(1)
 	await w.advance(MINUTE)
@@ -253,8 +257,8 @@ test('a break of just 3 minutes counts, and no alert comes during it', async () 
 test('a gap with no tick (sleep, no session open) counts as a break', async () => {
 	// The last tick a minute before keeps the pomodoro; one 3 minutes before is a gap.
 	for (const [seenAgo, label] of [
-		[MINUTE, '🍅 20/25m'],
-		[3 * MINUTE, '🍅 0/25m'],
+		[MINUTE, '🍅 1 of 4 · 20/25m'],
+		[3 * MINUTE, '🍅 1 of 4 · 0/25m'],
 	] as const) {
 		const w = world({
 			seed: { timer: { blockStart: T0 - 20 * MINUTE, seenAt: T0 - seenAgo } },
@@ -324,8 +328,8 @@ test('over SSH ioreg never runs: activity stands in, and 3 minutes without it is
 	// No activity before the first tick: nothing to say the person was there.
 	expect(w.shows.map((show) => show.label)).toEqual([
 		'🍅 on a break',
-		'🍅 0/25m',
-		'🍅 1/25m',
+		'🍅 1 of 4 · 1/25m',
+		'🍅 1 of 4 · 2/25m',
 		'🍅 on a break',
 	])
 })
@@ -462,8 +466,9 @@ test("a jiggler's nudge every minute neither holds off a break nor ends one", as
 	expect(w.label()).toBe('🍅 on a break')
 	await w.set(T0 + 39 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
+	// Back from the nudge at 39:12, which the looks of the return take in.
 	await w.set(T0 + 41 * MINUTE)
-	expect(w.label()).toBe('🍅 0/25m')
+	expect(w.label()).toBe('🍅 2 of 4 · 1/25m')
 })
 
 test('a stray key, or a click, never ends a break', async () => {
@@ -492,7 +497,7 @@ test('input seen in three looks within a minute counts', async () => {
 	await w.set(T0 + 14 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
 	await w.set(T0 + 15 * MINUTE)
-	expect(w.label()).toBe('🍅 0/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 0/25m')
 })
 
 test('scrolling now and then while reading holds off a break', async () => {
@@ -503,7 +508,7 @@ test('scrolling now and then while reading holds off a break', async () => {
 	start(w)
 	await w.set(T0 + 10 * MINUTE)
 	expect(w.shows.map((show) => show.label)).not.toContain('🍅 on a break')
-	expect(w.label()).toBe('🍅 10/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 10/25m')
 })
 
 test("an input every 30 seconds doesn't hold off a break", async () => {
@@ -513,7 +518,7 @@ test("an input every 30 seconds doesn't hold off a break", async () => {
 	})
 	start(w)
 	await w.set(T0 + 2 * MINUTE)
-	expect(w.label()).toBe('🍅 2/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 2/25m')
 	await w.set(T0 + 8 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
 })
@@ -524,7 +529,7 @@ test('3 minutes away is a break, 2 minutes 59 is not', async () => {
 	const pomodoro = start(w)
 	await w.set(T0 + 12 * MINUTE + 59_000)
 	await pomodoro.tick()
-	expect(w.label()).toBe('🍅 12/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 12/25m')
 	await w.set(T0 + 13 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
 })
@@ -585,7 +590,7 @@ test('without ioreg, a break is a break from every session', async () => {
 	})
 	const pomodoro = start(w)
 	await w.settle()
-	expect(w.label()).toBe('🍅 20/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 20/25m')
 
 	for (let i = 0; i < 5; i++) {
 		await pomodoro.activity(true)
@@ -595,7 +600,7 @@ test('without ioreg, a break is a break from every session', async () => {
 
 	// 2 minutes without activity is no break, 3 are.
 	await w.advance(MINUTE)
-	expect(w.label()).toBe('🍅 26/25m')
+	expect(w.label()).toBe('🍅 2 of 4 · 1/25m')
 	await w.advance(MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
 })
@@ -624,7 +629,7 @@ test('a short lock is nothing, a lock of 3 minutes is a break', async () => {
 	})
 	start(w)
 	await w.set(T0 + 12 * MINUTE)
-	expect(w.label()).toBe('🍅 12/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 12/25m')
 	await w.set(T0 + 15 * MINUTE + 30_000)
 	expect(w.label()).toBe('🍅 on a break')
 })
@@ -679,7 +684,7 @@ test('watching the main agent work is no break', async () => {
 		await pomodoro.activity(true)
 	}
 	expect(w.shows.map((show) => show.label)).not.toContain('🍅 on a break')
-	expect(w.label()).toBe('🍅 30/25m')
+	expect(w.label()).toBe('🍅 2 of 4 · 5/25m')
 	expect(w.notified[0]).toStartWith('🍅 25 minutes without a break.')
 })
 
@@ -703,7 +708,7 @@ test('3 minutes with nothing from the person or the main agent is a break, mid-t
 	await w.set(T0 + 12 * MINUTE)
 	await pomodoro.activity(true)
 	await w.set(T0 + 14 * MINUTE + 59_000)
-	expect(w.label()).toBe('🍅 14/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 14/25m')
 	await w.set(T0 + 15 * MINUTE + 30_000)
 	expect(w.label()).toBe('🍅 on a break')
 })
@@ -722,12 +727,12 @@ test("a break's length counts from the person's own last input", async () => {
 		await pomodoro.activity(true)
 	}
 	await w.set(T0 + 22 * MINUTE + 59_000)
-	expect(w.label()).toBe('🍅 22/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 22/25m')
 	await w.set(T0 + 32 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
 	expect((w.store.timer as Timer).breakStart).toBe(T0 + 10 * MINUTE)
 	await w.set(T0 + 33 * MINUTE)
-	expect(w.label()).toBe('🍅 0/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 1/25m')
 })
 
 // A reload's first look counts at once, a stray key 5 minutes ago too: the break goes on from when it began.
@@ -766,7 +771,7 @@ test('a lock of under 3 minutes is no break when the person is back right after 
 		start(w)
 		await w.set(T0 + 16 * MINUTE)
 		expect(w.shows.map((show) => show.label)).not.toContain('🍅 on a break')
-		expect(w.label()).toBe('🍅 16/25m')
+		expect(w.label()).toBe('🍅 1 of 4 · 16/25m')
 	}
 })
 
@@ -791,8 +796,177 @@ test("a prompt is the person's own input: it ends a break", async () => {
 		await w.set(at)
 		await pomodoro.activity(true)
 	}
-	expect(w.label()).toBe('🍅 0/25m')
+	// Back at the prompt.
+	expect(w.label()).toBe('🍅 1 of 4 · 1/25m')
 	const timer = w.store.timer as Timer
 	expect(timer.lastInput).toBe(T0 + 14 * MINUTE)
 	expect(timer.breakStart).toBeUndefined()
+})
+
+test('the count shows the pomodoro under way and the minutes into it', async () => {
+	const w = world()
+	start(w)
+	await w.set(T0 + 12 * MINUTE)
+	expect(w.label()).toBe('🍅 1 of 4 · 12/25m')
+	// 52 minutes straight: two pomodoros, and 2 minutes into the third.
+	await w.set(T0 + 52 * MINUTE)
+	expect(w.shows.at(-1)).toEqual({
+		label: '🍅 3 of 4 · 2/25m',
+		warning: '🍅 52m, time for a break',
+	})
+})
+
+// Each return below comes 10 seconds into a minute, so the minute's tick after it is the first of the new pomodoro.
+test("a pomodoro cut short doesn't count", async () => {
+	// In use for 20 minutes, then away for 4.
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 20 * MINUTE),
+			...steady(T0 + 24 * MINUTE + 10_000, T0 + 30 * MINUTE),
+		]),
+	})
+	start(w)
+	await w.set(T0 + 24 * MINUTE)
+	expect(w.label()).toBe('🍅 on a break')
+	await w.set(T0 + 25 * MINUTE)
+	expect(w.label()).toBe('🍅 1 of 4 · 0/25m')
+})
+
+test('a short break keeps the set, 15 minutes away starts a new one', async () => {
+	for (const [away, label] of [
+		[4, '🍅 2 of 4 · 0/25m'],
+		[10, '🍅 2 of 4 · 0/25m'],
+		[16, '🍅 1 of 4 · 0/25m'],
+	] as const) {
+		// In use for 25 minutes, then away.
+		const backAt = T0 + (25 + away) * MINUTE + 10_000
+		const w = world({
+			idle: inputs([
+				...steady(T0, T0 + 25 * MINUTE),
+				...steady(backAt, backAt + 5 * MINUTE),
+			]),
+		})
+		start(w)
+		await w.set(backAt - 10_000)
+		expect(w.label()).toBe('🍅 on a break')
+		await w.set(backAt + 50_000)
+		expect(w.label()).toBe(label)
+	}
+})
+
+test("after the fourth the alert asks for the long break, and a short break doesn't end the set", async () => {
+	// Rounds of 30 minutes, in use for 26 and away for 4; after the fifth, away for 15.
+	const at = (minutes: number) => T0 + minutes * MINUTE
+	const w = world({
+		idle: inputs([
+			...steady(at(0), at(26)),
+			...[1, 2, 3, 4].flatMap((round) =>
+				steady(at(30 * round) + 10_000, at(30 * round + 26)),
+			),
+			...steady(at(161) + 10_000, at(165)),
+		]),
+	})
+	start(w)
+	const short =
+		'🍅 25 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.'
+	const long =
+		"🍅 25 minutes without a break. That's 4 pomodoros: take a 15 to 30 minute break."
+	await w.set(at(116))
+	expect(w.notified).toEqual([short, short, short, long])
+	expect(w.shows.at(-1)?.warning).toBe('🍅 25m, time for a long break')
+	await w.set(at(121))
+	expect(w.label()).toBe('🍅 5 of 4 · 0/25m')
+	await w.set(at(146))
+	expect(w.notified).toEqual([short, short, short, long, long])
+	await w.set(at(162))
+	expect(w.label()).toBe('🍅 1 of 4 · 0/25m')
+})
+
+test('a closed lid for 15 minutes or more is a long break', async () => {
+	for (const [closed, label] of [
+		[20, '🍅 1 of 4 · 0/25m'],
+		[5, '🍅 2 of 4 · 0/25m'],
+	] as const) {
+		// In use for 30 minutes, then the lid closed, and in use again from when it opens.
+		const openedAt = T0 + (30 + closed) * MINUTE
+		const w = world({
+			idle: inputs([
+				...steady(T0, T0 + 30 * MINUTE),
+				...steady(openedAt, openedAt + 5 * MINUTE),
+			]),
+		})
+		start(w)
+		await w.set(T0 + 30 * MINUTE)
+		expect(w.label()).toBe('🍅 2 of 4 · 5/25m')
+		w.sleep(closed * MINUTE)
+		await w.advance(MINUTE)
+		expect(w.label()).toBe(label)
+	}
+})
+
+test('the check-in at the end of a set asks for the long break', async () => {
+	const w = world()
+	const pomodoro = start(w)
+	await w.set(T0 + 26 * MINUTE)
+	expect(pomodoro.toolResult(true)).toEndWith('Remind them to take a break.')
+	// 100 minutes straight: four pomodoros.
+	await w.set(T0 + 101 * MINUTE)
+	expect(pomodoro.toolResult(true)).toEndWith(
+		"Remind them to take a 15 to 30 minute break: that's 4 pomodoros.",
+	)
+})
+
+test('a timer stored by 0.6 still loads', async () => {
+	const w = world({
+		seed: {
+			timer: {
+				blockStart: T0 - 10 * MINUTE,
+				seenAt: T0,
+				alertedAt: 0,
+				lastInput: T0,
+			},
+		},
+	})
+	start(w)
+	await w.settle()
+	expect(w.label()).toBe('🍅 1 of 4 · 10/25m')
+})
+
+// A return read before the break began (a stray look, another session's) isn't this break's, and a break found before
+// any activity (at 0, off macOS) began long ago: either way, 20 minutes or more away from a set two pomodoros in.
+test('the return is never before the break began, and a break from 0 is a long one', () => {
+	const now = T0 + 20 * MINUTE
+	for (const [backAt, breakStart] of [
+		[T0 - MINUTE, T0],
+		[undefined, 0],
+	] as const) {
+		const { effects } = step(
+			{
+				lastActivity: 0,
+				looks: [],
+				awaitingSummary: false,
+				lastInputThatCounts: now - 10_000,
+				backAt,
+			},
+			{
+				type: 'tick',
+				now,
+				timer: {
+					blockStart: T0 - 30 * MINUTE,
+					done: 1,
+					seenAt: now - MINUTE,
+					lastInput: breakStart,
+					breakStart,
+				},
+				isLocked: false,
+			},
+			DEFAULTS,
+			'en',
+		)
+		expect(effects).toContainEqual({
+			type: 'show',
+			label: '🍅 1 of 4 · 0/25m',
+			warning: undefined,
+		})
+	}
 })
