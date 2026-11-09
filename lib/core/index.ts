@@ -7,7 +7,9 @@ import { type Language, messages } from './messages'
 // Shared by every open session through the agent's store: one pomodoro per person, not per session. `blockStart` is when
 // the stretch of work since the last break began, `done` the pomodoros of the set before it, `lastInput` the person's
 // own (while quiet, the person is there until a tick sees the screen locked), `agentAt` the main agent's last activity,
-// `breakStart` when the break under way began, and `quiet` whether /pomodoro quiet is on.
+// `breakStart` when the break under way began, and `quiet` whether /pomodoro quiet is on. `repo` is the repository the
+// tally credits, that of the ticking session with the latest activity, at `repoAt`; `counted` the pomodoros of this
+// stretch already in the tally.
 export type Timer = {
 	blockStart?: number
 	done?: number
@@ -17,9 +19,23 @@ export type Timer = {
 	agentAt?: number
 	breakStart?: number
 	quiet?: boolean
+	repo?: string | null
+	repoAt?: number
+	counted?: number
 }
 // The agent's summary at a check-in, kept for /pomodoro today.
 export type CheckIn = { at: number; repo: string | null; text: string }
+// The tally /pomodoro today counts, by repository: a pomodoro when its 25 minutes were up, `run` the start of its
+// stretch; a break when the person came back, `ms` away after a stretch of `runMs`.
+export type TallyEntry =
+	| { at: number; repo: string | null; kind: 'pomodoro'; run: number }
+	| {
+			at: number
+			repo: string | null
+			kind: 'break'
+			ms: number
+			runMs: number
+	  }
 // The Claude plugin's plugin.json declares the same defaults.
 export const DEFAULTS = { sound: true, emoji: true }
 export type Settings = Readonly<typeof DEFAULTS>
@@ -91,6 +107,8 @@ type Effect =
 	| { type: 'headsUp'; text: string }
 	// Add the summary to the log.
 	| { type: 'log'; text: string }
+	// Add these to the tally.
+	| { type: 'tally'; entries: TallyEntry[] }
 
 export const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
@@ -142,9 +160,9 @@ export type Host = {
 	// `fn` once after `ms`, or every `ms`; each returns what cancels it.
 	after: (ms: number, fn: () => void) => () => void
 	every: (ms: number, fn: () => void) => () => void
-	// What every session of the agent shares: the timer, and the log of summaries.
-	load: (key: 'timer' | 'checkIns') => Promise<unknown>
-	save: (key: 'timer' | 'checkIns', value: unknown) => Promise<void>
+	// What every session of the agent shares: the timer, the log of summaries, and the tally.
+	load: (key: 'timer' | 'checkIns' | 'tally') => Promise<unknown>
+	save: (key: 'timer' | 'checkIns' | 'tally', value: unknown) => Promise<void>
 	// A command's output; a rejection or '' when it can't run, which core takes the same.
 	run: (argv: readonly string[], timeoutMs?: number) => Promise<string>
 	// The root of the session's repository (null: none).
@@ -250,7 +268,15 @@ export function createInstance(
 				'"IOConsoleLocked" = Yes',
 			)
 		const now = await host.now()
-		const timer = ((await host.load('timer')) ?? {}) as Timer
+		let timer = ((await host.load('timer')) ?? {}) as Timer
+		// The tally credits the repository of the session with the latest activity: this one's, once its activity is newer
+		// than that stored, or none is. Only a ticking session writes it, so a `claude -p` run elsewhere takes no credit.
+		if (state.lastActivity > (timer.repoAt ?? -1))
+			timer = {
+				...timer,
+				repo: await host.repo().catch(() => null),
+				repoAt: state.lastActivity,
+			}
 		for (const effect of feed({ type: 'tick', now, timer, isLocked })) {
 			// A tick still under way when the instance stopped carries out nothing more: its session is gone.
 			if (isStopped) return
@@ -262,13 +288,25 @@ export function createInstance(
 					() => void runTick().catch(() => {}),
 				)
 			}
-			// ponytail: read-then-write, so two sessions ticking in the same instant can both alert
+			// ponytail: read-then-write, so two sessions ticking in the same instant can both alert, or both add a pomodoro
 			else if (effect.type === 'persist') await host.save('timer', effect.timer)
 			else if (effect.type === 'show') host.show(effect.label, effect.warning)
 			else if (effect.type === 'alert')
 				await alert(effect.text, effect.sound, effect.mark)
 			else if (effect.type === 'toast') host.toast(effect.text)
+			else if (effect.type === 'tally')
+				await tally(now, effect.entries).catch(() => {})
 		}
+	}
+
+	// The tally with `entries` added, less the entries 14 days old.
+	// ponytail: read-then-write, so two sessions adding in the same instant can drop one
+	async function tally(now: number, entries: TallyEntry[]) {
+		const stored = ((await host.load('tally')) ?? []) as TallyEntry[]
+		await host.save('tally', [
+			...stored.filter((entry) => now - entry.at < 14 * DAY),
+			...entries,
+		])
 	}
 
 	// Quiet on or off for every session of the agent, then a tick at once: the count says so, and off, a break due alerts
@@ -342,8 +380,14 @@ export function createInstance(
 			if (args.trim() === 'quiet') return toggleQuiet()
 			if (!['', 'today'].includes(args.trim())) return messages[language].usage
 			return today(
-				((await host.load('checkIns')) ?? []) as CheckIn[],
-				await host.now(),
+				{
+					tally: ((await host.load('tally')) ?? []) as TallyEntry[],
+					log: ((await host.load('checkIns')) ?? []) as CheckIn[],
+					timer: ((await host.load('timer')) ?? {}) as Timer,
+					now: await host.now(),
+					repo: await host.repo().catch(() => null),
+				},
+				settings,
 				language,
 			)
 		},
@@ -488,7 +532,9 @@ function tick(
 
 	// The break began at the person's own last input, not the agent's. It forgets the last return: the look that counts
 	// the next one sets it again, and where another session's input ends this break first, there's none to read. The
-	// stretch before it and the set are kept for the return; quiet isn't.
+	// stretch before it, the set and the tally's are kept for the return; quiet isn't.
+	const { repo = null, repoAt } = timer
+	let inTally = timer.counted ?? 0
 	if (idle >= SHORT_BREAK)
 		return {
 			state: {
@@ -507,6 +553,9 @@ function tick(
 						lastInput,
 						agentAt,
 						breakStart: timer.breakStart ?? lastInput,
+						repo,
+						repoAt,
+						counted: inTally,
 					},
 				},
 				{
@@ -526,6 +575,7 @@ function tick(
 	let blockStart = timer.blockStart ?? now
 	let done = timer.done ?? 0
 	let away: number | undefined
+	const entries: TallyEntry[] = []
 	if (leftAt !== undefined) {
 		// Back at the first input of the run that counted again. Not a look from before the break began, which was stray
 		// input; without one (no looks, or another session's input ended the break), at the person's latest presence.
@@ -536,14 +586,22 @@ function tick(
 		// The pomodoros up before the break count, one cut short doesn't; a long break starts a new set. A break that began
 		// before any activity (at 0, off macOS) began long ago.
 		away = Math.max(0, backAt - leftAt)
-		done =
-			away >= LONG_BREAK
-				? 0
-				: done + Math.floor(Math.max(0, leftAt - blockStart) / POMODORO)
+		const runMs = Math.max(0, leftAt - blockStart)
+		const upBefore = Math.floor(runMs / POMODORO)
+		done = away >= LONG_BREAK ? 0 : done + upBefore
+		// Into the tally: those no tick saw up (the lid closed right after one), and the break, unless it began before any
+		// activity, which has no length to tell. None of the new stretch's are in yet.
+		entries.push(...pomodoros(blockStart, inTally, upBefore, repo))
+		if (leftAt !== 0)
+			entries.push({ at: backAt, repo, kind: 'break', ms: away, runMs })
 		blockStart = backAt
+		inTally = 0
 	}
 	const worked = now - blockStart
 	const minutes = Math.floor(worked / MINUTE)
+	// A pomodoro goes into the tally once its 25 minutes are up, by the first session to tick then.
+	const up = Math.floor(worked / POMODORO)
+	entries.push(...pomodoros(blockStart, inTally, up, repo))
 	// Once a pomodoro is up, a break is due, except while quiet: then the count goes on, but nothing asks for one, the
 	// alert, the warning or the notes to the agent.
 	const isDue = worked >= POMODORO && !isQuiet
@@ -569,6 +627,9 @@ function tick(
 				lastInput,
 				agentAt,
 				quiet: isQuiet,
+				repo,
+				repoAt,
+				counted: Math.max(inTally, up),
 			},
 		},
 		{
@@ -595,6 +656,7 @@ function tick(
 			mark: tomato(settings),
 			sound: settings.sound,
 		})
+	if (entries.length > 0) effects.push({ type: 'tally', entries })
 	// One check-in per pomodoro that ends without a break, keyed by when that pomodoro ended; one heads-up per pomodoro in
 	// its last minutes, keyed by when it ends, except while quiet.
 	const due = isDue
@@ -609,6 +671,21 @@ function tick(
 			: undefined
 	return { state: { ...state, due, headsUp }, effects }
 }
+
+// The tally's entries for the pomodoros of the stretch from `run`, after the first `from` up to the `to`th, each at the
+// moment its 25 minutes were up.
+const pomodoros = (
+	run: number,
+	from: number,
+	to: number,
+	repo: string | null,
+): TallyEntry[] =>
+	Array.from({ length: Math.max(0, to - from) }, (_, i) => ({
+		at: run + (from + i + 1) * POMODORO,
+		repo,
+		kind: 'pomodoro',
+		run,
+	}))
 
 // The check-in and the heads-up ride a tool result of the main loop, each once per pomodoro. Each counts as sent from
 // here, so two tool results at once can't both carry it.
@@ -660,21 +737,68 @@ const logged = (log: CheckIn[], entry: CheckIn): CheckIn[] => [
 	{ ...entry, text: entry.text.slice(0, 4_000) },
 ]
 
-// Today's check-ins at local time, under the name of their repository's folder.
-function today(log: CheckIn[], now: number, language: Language) {
-	const words = messages[language]
-	const day = new Date(now).toDateString()
-	const byRepo = new Map<string | null, string[]>()
-	for (const { at, repo, text } of log)
-		if (new Date(at).toDateString() === day)
-			byRepo.set(repo, [
-				...(byRepo.get(repo) ?? []),
-				`  ${new Date(at).toTimeString().slice(0, 5)}  ${text.replaceAll('\n', '\n         ')}`,
-			])
-	if (byRepo.size === 0) return words.noCheckIns
-	return [...byRepo]
-		.map(([repo, lines]) =>
-			[repo?.split(/[/\\]/).at(-1) ?? words.noRepository, ...lines].join('\n'),
-		)
-		.join('\n\n')
+// The day's tally in `repo`, at local time, then its check-ins of the day. Long breaks count after a pomodoro of the day,
+// so the night before the first doesn't; a stretch counts on the day it ended, and the one under way (or just ended by
+// the break under way) while a tick has seen it lately.
+function today(
+	{
+		tally,
+		log,
+		timer,
+		now,
+		repo,
+	}: {
+		tally: TallyEntry[]
+		log: CheckIn[]
+		timer: Timer
+		now: number
+		repo: string | null
+	},
+	settings: Settings,
+	language: Language,
+) {
+	const day = (at: number) => new Date(at).toDateString()
+	const date = new Date(now)
+	date.setDate(date.getDate() - 1)
+	const yesterday = date.toDateString()
+	const isToday = (at: number) => day(at) === day(now)
+	const mine = tally.filter((entry) => entry.repo === repo)
+	const pomodoros = mine.filter((entry) => entry.kind === 'pomodoro')
+	const breaks = mine.filter((entry) => entry.kind === 'break')
+	const todays = pomodoros.filter((p) => isToday(p.at))
+	const current =
+		timer.blockStart !== undefined && now - (timer.seenAt ?? 0) < SHORT_BREAK
+			? (timer.breakStart ?? now) - timer.blockStart
+			: 0
+	const longest = Math.max(
+		0,
+		current,
+		...breaks.filter((b) => isToday(b.at - b.ms)).map((b) => b.runMs),
+	)
+	const head =
+		todays.length === 0
+			? messages[language].noPomodoros
+			: messages[language].today({
+					mark: tomato(settings),
+					pomodoros: todays.length,
+					yesterday: pomodoros.filter((p) => day(p.at) === yesterday).length,
+					longBreaks: breaks.filter(
+						(b) =>
+							isToday(b.at) &&
+							b.ms >= LONG_BREAK &&
+							todays.some((p) => p.at < b.at),
+					).length,
+					// Each stretch's pomodoros after its first.
+					skipped: todays.length - new Set(todays.map((p) => p.run)).size,
+					longest: Math.floor(longest / MINUTE),
+				})
+	return [
+		head,
+		...log
+			.filter((c) => c.repo === repo && isToday(c.at))
+			.map(
+				({ at, text }) =>
+					`${new Date(at).toTimeString().slice(0, 5)}  ${text.replaceAll('\n', '\n       ')}`,
+			),
+	].join('\n')
 }

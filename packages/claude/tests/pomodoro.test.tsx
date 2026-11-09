@@ -264,7 +264,7 @@ test('/pomodoro quiet runs mid-turn, and the count shows it', async ($, on) => {
 		{
 			name: 'pomodoro',
 			description:
-				"Lists today's check-ins by repository, or turns quiet on or off.",
+				"Shows today's pomodoros and check-ins in this repository, or turns quiet on or off.",
 			argumentHint: 'today | quiet',
 			immediate: true,
 		},
@@ -428,10 +428,10 @@ test(
 )
 
 // Listed at the moment it's logged, so the day matches in any time zone: CI's and this Mac's differ.
-test("the check-in's summary is logged from any reply in its turn, and /pomodoro today lists it by repository", async ($, on) => {
+test("the check-in's summary is logged from any reply in its turn, and /pomodoro today lists it under the day's count", async ($, on) => {
 	const { clock, store, respond } = world(on, () => 0)
 	await start($)
-	expect(await listed($)).toBe('No check-ins today.')
+	expect(await listed($)).toBe('Today: no pomodoros yet.')
 
 	// A summary with no check-in before it logs nothing.
 	await respond($, 'Pomodoro: early.')
@@ -454,7 +454,7 @@ test("the check-in's summary is logged from any reply in its turn, and /pomodoro
 		'Pomodoro: on the goal.\nTake a break.',
 	])
 	expect(await listed($)).toMatch(
-		/^app\n {2}\d\d:\d\d {2}Pomodoro: on the goal\.\n {9}Take a break\.$/,
+		/^Today: 🍅 1 pomodoro \(yesterday 0\), 0 long breaks, 0 breaks skipped, longest 26m\n\d\d:\d\d {2}Pomodoro: on the goal\.\n {7}Take a break\.$/,
 	)
 })
 

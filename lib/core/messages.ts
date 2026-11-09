@@ -6,8 +6,18 @@ export type Messages = {
 	// The /pomodoro command's description, and its usage line.
 	description: string
 	usage: string
-	noCheckIns: string
-	noRepository: string
+	// /pomodoro today's first line: the day's pomodoros, yesterday's, the long breaks, the breaks skipped (a pomodoro
+	// followed by another with no break) and the longest stretch without a break in minutes, after `mark` (the 🍅 or
+	// nothing); or that no pomodoro has counted today.
+	today: (day: {
+		mark: string
+		pomodoros: number
+		yesterday: number
+		longBreaks: number
+		skipped: number
+		longest: number
+	}) => string
+	noPomodoros: string
 	// The label while on a break; the count, of the pomodoro under way in the set of 4 and the minutes into it; the
 	// warning once a pomodoro is up, and the alert, each with the minutes since the last break, asking for the long break
 	// at the end of a set.
@@ -28,12 +38,17 @@ export type Messages = {
 	notice: string
 }
 
+// `count` of a thing, its name in the singular or the plural.
+const plural = (count: number, one: string, many: string) =>
+	`${count} ${count === 1 ? one : many}`
+
 const en: Messages = {
 	description:
-		"Lists today's check-ins by repository, or turns quiet on or off.",
+		"Shows today's pomodoros and check-ins in this repository, or turns quiet on or off.",
 	usage: 'Usage: /pomodoro [today|quiet]',
-	noCheckIns: 'No check-ins today.',
-	noRepository: 'no repository',
+	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
+		`Today: ${mark}${plural(pomodoros, 'pomodoro', 'pomodoros')} (yesterday ${yesterday}), ${plural(longBreaks, 'long break', 'long breaks')}, ${plural(skipped, 'break', 'breaks')} skipped, longest ${longest}m`,
+	noPomodoros: 'Today: no pomodoros yet.',
 	onABreak: 'on a break',
 	count: (position, minutes) => `${position} of 4 · ${minutes}/25m`,
 	due: (minutes) => `${minutes}m, time for a break`,

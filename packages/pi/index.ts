@@ -1,5 +1,5 @@
 import { readFile, rename, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import {
 	type ExtensionAPI,
 	type ExtensionUIContext,
@@ -51,10 +51,12 @@ const KEPT = 'pomodoro'
 // Pi caches this factory per path, so everything lives in its closure, set again at each session start.
 export default function (pi: ExtensionAPI) {
 	const dir = getAgentDir()
-	// One timer per person, shared by every open Pi session, and the log of summaries after check-ins: a file each.
+	// One timer per person, shared by every open Pi session, the log of summaries after check-ins, and the tally: a file
+	// each.
 	const paths = {
 		timer: join(dir, 'pomodoro.json'),
 		checkIns: join(dir, 'pomodoro-log.json'),
+		tally: join(dir, 'pomodoro-tally.json'),
 	}
 	const settingsPath = join(dir, 'pomodoro-settings.json')
 
@@ -80,11 +82,16 @@ export default function (pi: ExtensionAPI) {
 		save: (key, value) => save(paths[key], value),
 		run: async ([file, ...args], timeoutMs) =>
 			(await pi.exec(file, args, { timeout: timeoutMs })).stdout,
+		// The main repository, from a worktree too, as Claude Code's session.repo() gives: the folder of its .git.
 		repo: async () => {
 			const { code, stdout } = await pi
-				.exec('git', ['rev-parse', '--show-toplevel'], { cwd, timeout: 5_000 })
+				.exec(
+					'git',
+					['rev-parse', '--path-format=absolute', '--git-common-dir'],
+					{ cwd, timeout: 5_000 },
+				)
 				.catch(() => ({ code: 1, stdout: '' }))
-			return code === 0 ? stdout.trim() : null
+			return code === 0 ? dirname(stdout.trim()) : null
 		},
 		// One status entry: the count, or that a break is due.
 		show: (label, warning) => ui?.setStatus('pomodoro', warning ?? label),

@@ -11,11 +11,15 @@ import {
 	type Settings,
 	settingsFrom,
 	step,
+	type TallyEntry,
 	type Timer,
 } from './index'
 
 const T0 = 1_700_000_000_000
 const DAY = 24 * 60 * MINUTE
+// 9:00 local time on the day after T0's, and `minutes` after it: the tally's days are local time.
+const NINE = new Date(T0 + DAY).setHours(9, 0, 0, 0)
+const nine = (minutes: number) => NINE + minutes * MINUTE
 
 // Claude Code checks its settings against plugin.json, and both agents go through settingsFrom, which must agree.
 test("plugin.json's defaults are settingsFrom's", () => {
@@ -470,24 +474,220 @@ test("check-ins older than 14 days are dropped, and /pomodoro today lists only t
 	await pomodoro.reply('Pomodoro: today.')
 	expect(texts(w.store.checkIns)).toEqual(['Two days ago.', 'Pomodoro: today.'])
 	expect(await pomodoro.command('today')).toMatch(
-		/^app\n {2}\d\d:\d\d {2}Pomodoro: today\.$/,
+		/^Today: 🍅 1 pomodoro \(yesterday 0\), 0 long breaks, 0 breaks skipped, longest 26m\n\d\d:\d\d {2}Pomodoro: today\.$/,
 	)
 })
 
-test("/pomodoro lists today's check-ins by repository", async () => {
+test('/pomodoro today with nothing yet', async () => {
 	const w = world()
 	const pomodoro = start(w)
 	for (const args of ['', ' today '])
-		expect(await pomodoro.command(args)).toBe('No check-ins today.')
+		expect(await pomodoro.command(args)).toBe('Today: no pomodoros yet.')
+})
+
+test("/pomodoro lists this repository's check-ins of today under the day's count", async () => {
+	const w = world()
+	const pomodoro = start(w)
 	w.store.checkIns = [
-		{ at: T0 - 2 * DAY, repo: null, text: 'Two days ago.' },
+		{ at: T0 - 2 * DAY, repo: '/code/app', text: 'Two days ago.' },
 		{ at: T0, repo: '/code/app', text: 'Pomodoro: on the goal.' },
-		{ at: T0 + 1, repo: null, text: 'Line one.\nLine two.' },
+		{ at: T0 + 1, repo: '/code/app', text: 'Line one.\nLine two.' },
+		{ at: T0 + 2, repo: null, text: 'In no repository.' },
 	]
 	for (const args of ['', ' today '])
 		expect(await pomodoro.command(args)).toMatch(
-			/^app\n {2}\d\d:\d\d {2}Pomodoro: on the goal\.\n\nno repository\n {2}\d\d:\d\d {2}Line one\.\n {9}Line two\.$/,
+			/^Today: no pomodoros yet\.\n\d\d:\d\d {2}Pomodoro: on the goal\.\n\d\d:\d\d {2}Line one\.\n {7}Line two\.$/,
 		)
+})
+
+// A world whose clock starts at `at`.
+function worldAt(at: number, options: Parameters<typeof world>[0] = {}) {
+	const w = world(options)
+	w.sleep(at - T0)
+	return w
+}
+
+test('the tally counts pomodoros, long breaks, skipped breaks and the longest stretch', async () => {
+	// In use for 75 minutes, away for 4, in use for 26, away for 20, and in use again.
+	const w = worldAt(NINE, {
+		idle: inputs([
+			...steady(nine(0), nine(75)),
+			...steady(nine(79) + 10_000, nine(105) + 10_000),
+			...steady(nine(125) + 20_000, nine(152)),
+		]),
+	})
+	const pomodoro = start(w)
+	await w.set(nine(152))
+	expect(await pomodoro.command('today')).toBe(
+		'Today: 🍅 5 pomodoros (yesterday 0), 1 long break, 2 breaks skipped, longest 75m',
+	)
+})
+
+test('without the emoji, the count of the day has no tomato', async () => {
+	const w = worldAt(NINE)
+	const pomodoro = start(w, { emoji: false })
+	await w.set(nine(25))
+	expect(await pomodoro.command('today')).toBe(
+		'Today: 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 25m',
+	)
+})
+
+// Each counts for the repository of the session with the latest activity when it ended.
+test("/pomodoro today counts only this repository's, and lists only its summaries", async () => {
+	const w = worldAt(NINE, {
+		seed: {
+			checkIns: [
+				{ at: nine(26), repo: '/code/app', text: 'Pomodoro: in app.' },
+				{ at: nine(51), repo: '/code/web', text: 'Pomodoro: in web.' },
+			],
+		},
+	})
+	const app = start(w)
+	// Another session of the agent, in another repository, on the same store.
+	const web = createInstance(
+		{ ...w.host, repo: async () => '/code/web' },
+		{ settings: DEFAULTS, remote: false, language: 'en' },
+	)
+	web.start()
+	await w.settle()
+	await app.activity(true)
+	await w.set(nine(51))
+	await web.activity(true)
+	await w.set(nine(76))
+	expect(await app.command('today')).toBe(
+		'Today: 🍅 2 pomodoros (yesterday 0), 0 long breaks, 1 break skipped, longest 76m\n09:26  Pomodoro: in app.',
+	)
+	expect(await web.command('today')).toBe(
+		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 76m\n09:51  Pomodoro: in web.',
+	)
+})
+
+test("the night before the first pomodoro is no long break, and its stretch not the day's longest", async () => {
+	// The evening before, in use from 20:00 to 20:50, then the lid closed for the night. In use from 8:00 to 8:45:30,
+	// away for 20 minutes, and in use again.
+	const evening = nine(-13 * 60)
+	const w = worldAt(evening, {
+		idle: inputs([
+			...steady(evening, evening + 50 * MINUTE),
+			...steady(nine(-60), nine(-15) + 30_000),
+			...steady(nine(5) + 10_000, nine(31)),
+		]),
+	})
+	const pomodoro = start(w)
+	await w.set(evening + 50 * MINUTE)
+	w.sleep(nine(-60) - w.now())
+	await w.set(nine(31))
+	expect(await pomodoro.command('today')).toBe(
+		'Today: 🍅 2 pomodoros (yesterday 2), 1 long break, 0 breaks skipped, longest 45m',
+	)
+})
+
+test('a pomodoro at 23:50 counts for that day', async () => {
+	// From 23:25, in use for 27 minutes, then the lid closed for the night, and in use from 8:00.
+	const late = nine(14 * 60 + 25)
+	const morning = nine(23 * 60)
+	const w = worldAt(late, {
+		idle: inputs([
+			...steady(late, late + 27 * MINUTE),
+			...steady(morning, morning + 26 * MINUTE),
+		]),
+	})
+	const pomodoro = start(w)
+	await w.set(late + 27 * MINUTE)
+	expect(await pomodoro.command('today')).toBe(
+		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 27m',
+	)
+	w.sleep(morning - w.now())
+	await w.set(morning + 26 * MINUTE)
+	expect(await pomodoro.command('today')).toBe(
+		'Today: 🍅 1 pomodoro (yesterday 1), 0 long breaks, 0 breaks skipped, longest 25m',
+	)
+})
+
+// The tick that ends the break counts it, as the set does.
+test('a pomodoro up just before the lid closed counts, though no tick saw it', async () => {
+	// 24 minutes 30 into a pomodoro, in use for 40 seconds more, then the lid closed for 10 minutes, and in use again.
+	const blockStart = NINE - 24 * MINUTE - 30_000
+	const w = worldAt(NINE, {
+		idle: inputs([
+			...steady(blockStart, NINE + 40_000),
+			...steady(nine(10) + 40_000, nine(12)),
+		]),
+		seed: { timer: { blockStart, seenAt: NINE - 30_000, lastInput: NINE } },
+	})
+	const pomodoro = start(w)
+	await w.set(NINE + 40_000)
+	w.sleep(10 * MINUTE)
+	await w.set(nine(12))
+	expect(await pomodoro.command('today')).toBe(
+		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 25m',
+	)
+})
+
+// The tick that counts a pomodoro stores the timer with it counted, and the one that ends a break without the break:
+// the other session's has neither to add.
+test('two sessions add each pomodoro and each break to the tally once', async () => {
+	// In use for 25 minutes, away for 4, and in use again.
+	const w = worldAt(NINE, {
+		idle: inputs([
+			...steady(nine(0), nine(25)),
+			...steady(nine(29) + 10_000, nine(55)),
+		]),
+	})
+	const sessions = [start(w), start(w)]
+	await w.set(nine(55))
+	expect(w.store.tally).toEqual([
+		{ at: nine(25), repo: '/code/app', kind: 'pomodoro', run: NINE },
+		{
+			at: nine(29) + 10_000,
+			repo: '/code/app',
+			kind: 'break',
+			ms: 4 * MINUTE + 10_000,
+			runMs: 25 * MINUTE,
+		},
+		{
+			at: nine(54) + 10_000,
+			repo: '/code/app',
+			kind: 'pomodoro',
+			run: nine(29) + 10_000,
+		},
+	] satisfies TallyEntry[])
+	for (const pomodoro of sessions)
+		expect(await pomodoro.command('today')).toBe(
+			'Today: 🍅 2 pomodoros (yesterday 0), 0 long breaks, 0 breaks skipped, longest 25m',
+		)
+})
+
+test("yesterday's count is this repository's, and the tally keeps 14 days", async () => {
+	const pomodoroAt = (at: number, repo = '/code/app'): TallyEntry => ({
+		at,
+		repo,
+		kind: 'pomodoro',
+		run: at - 25 * MINUTE,
+	})
+	const w = worldAt(NINE, {
+		seed: {
+			tally: [
+				pomodoroAt(NINE - 14 * DAY),
+				pomodoroAt(NINE - 2 * DAY),
+				pomodoroAt(NINE - DAY),
+				pomodoroAt(NINE - DAY + 25 * MINUTE),
+				pomodoroAt(NINE - DAY, '/code/web'),
+			],
+		},
+	})
+	const pomodoro = start(w)
+	await w.set(nine(25))
+	expect(await pomodoro.command('today')).toBe(
+		'Today: 🍅 1 pomodoro (yesterday 2), 0 long breaks, 0 breaks skipped, longest 25m',
+	)
+	expect((w.store.tally as TallyEntry[]).map((entry) => entry.at)).toEqual([
+		NINE - 2 * DAY,
+		NINE - DAY,
+		NINE - DAY + 25 * MINUTE,
+		NINE - DAY,
+		nine(25),
+	])
 })
 
 test('/pomodoro with anything else gives the usage', async () => {
