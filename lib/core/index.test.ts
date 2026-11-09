@@ -186,7 +186,7 @@ const texts = (checkIns: unknown) => (checkIns as CheckIn[]).map((c) => c.text)
 async function checkedIn(w: World) {
 	const pomodoro = start(w)
 	await w.advance(26 * MINUTE)
-	expect(pomodoro.toolResult(true)).toBeDefined()
+	expect(pomodoro.toolResult(true).checkIn).toBeDefined()
 	return pomodoro
 }
 
@@ -340,26 +340,57 @@ test("one check-in per pomodoro, on a main-loop tool result, kept so that a relo
 	const w = world()
 	const pomodoro = start(w)
 	await w.advance(26 * MINUTE)
-	expect(pomodoro.toolResult(false)).toBeUndefined()
-	expect(pomodoro.toolResult(true)).toStartWith(
-		'[Pomodoro] The user has been working for 26 minutes without a break.',
-	)
-	expect(pomodoro.toolResult(true)).toBeUndefined()
+	expect(pomodoro.toolResult(false)).toEqual({})
+	expect(pomodoro.toolResult(true)).toEqual({
+		checkIn: expect.stringContaining(
+			'[Pomodoro] The user has been working for 26 minutes without a break.',
+		),
+		notice: '🍅 Pomodoro: told the agent your pomodoro is up.',
+	})
+	expect(pomodoro.toolResult(true)).toEqual({})
 	expect(w.keeps).toEqual([T0 + 25 * MINUTE])
 
 	// A reload (a /config change): the session's next instance gets what this one kept.
 	pomodoro.stop()
 	const reloaded = start(w, {}, { kept: w.keeps[0] })
 	await w.settle()
-	expect(reloaded.toolResult(true)).toBeUndefined()
+	expect(reloaded.toolResult(true)).toEqual({})
 	await w.advance(25 * MINUTE)
-	expect(reloaded.toolResult(true)).toStartWith(
+	expect(reloaded.toolResult(true).checkIn).toStartWith(
 		'[Pomodoro] The user has been working for 51 minutes without a break.',
 	)
 	expect(w.keeps).toEqual([T0 + 25 * MINUTE, T0 + 50 * MINUTE])
 })
 
-test('a break clears the check-in due', async () => {
+const HEADS_UP =
+	"[Pomodoro] The user's pomodoro ends in about 5 minutes. Bring the current step to a stopping point, and don't start anything big."
+
+test('the heads-up comes once, 5 minutes before each pomodoro ends, on a main-loop tool result', async () => {
+	const w = world()
+	const pomodoro = start(w)
+	await w.set(T0 + 19 * MINUTE)
+	expect(pomodoro.toolResult(true)).toEqual({})
+	await w.set(T0 + 20 * MINUTE + 30_000)
+	expect(pomodoro.toolResult(false)).toEqual({})
+	expect(pomodoro.toolResult(true)).toEqual({ headsUp: HEADS_UP })
+	await w.set(T0 + 21 * MINUTE)
+	expect(pomodoro.toolResult(true)).toEqual({})
+	// The check-in when this pomodoro is up, then the next pomodoro's heads-up.
+	await w.set(T0 + 26 * MINUTE)
+	expect(pomodoro.toolResult(true).headsUp).toBeUndefined()
+	await w.set(T0 + 45 * MINUTE + 30_000)
+	expect(pomodoro.toolResult(true)).toEqual({ headsUp: HEADS_UP })
+
+	// None while quiet.
+	const quiet = world()
+	const meeting = start(quiet)
+	await quiet.set(T0 + 10 * MINUTE)
+	await meeting.command('quiet')
+	await quiet.set(T0 + 20 * MINUTE + 30_000)
+	expect(meeting.toolResult(true)).toEqual({})
+})
+
+test('a break clears the check-in and the heads-up due', async () => {
 	let leftAt = Infinity
 	const w = world({ idle: (now) => (now >= leftAt ? now - leftAt : 0) })
 	const pomodoro = start(w)
@@ -367,7 +398,14 @@ test('a break clears the check-in due', async () => {
 	leftAt = w.now()
 	await w.advance(6 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
-	expect(pomodoro.toolResult(true)).toBeUndefined()
+	expect(pomodoro.toolResult(true)).toEqual({})
+
+	// Away from 20 minutes in, as the heads-up came due: on the break, none.
+	const away = world({ idle: inputs(steady(T0, T0 + 20 * MINUTE)) })
+	const resting = start(away)
+	await away.set(T0 + 23 * MINUTE)
+	expect(away.label()).toBe('🍅 on a break')
+	expect(resting.toolResult(true)).toEqual({})
 })
 
 test("the check-in's summary is logged from the first reply that has one, until the turn ends", async () => {
@@ -376,12 +414,12 @@ test("the check-in's summary is logged from the first reply that has one, until 
 	// No summary is awaited before the check-in.
 	await pomodoro.reply('Pomodoro: early.')
 	await w.advance(26 * MINUTE)
-	expect(pomodoro.toolResult(true)).toBeDefined()
+	expect(pomodoro.toolResult(true).checkIn).toBeDefined()
 	await pomodoro.reply('Wrote a.txt.')
 	await pomodoro.reply('Done.\n\nPomodoro: on the goal.')
 	await pomodoro.reply('Pomodoro: again.')
 	// Only the tool result that carries the check-in starts a wait.
-	expect(pomodoro.toolResult(true)).toBeUndefined()
+	expect(pomodoro.toolResult(true)).toEqual({})
 	await pomodoro.reply('Pomodoro: after another tool result.')
 	expect(w.store.checkIns).toEqual([
 		{ at: T0 + 26 * MINUTE, repo: '/code/app', text: 'Pomodoro: on the goal.' },
@@ -389,7 +427,7 @@ test("the check-in's summary is logged from the first reply that has one, until 
 
 	// The next pomodoro's check-in, in a turn that ends without its summary.
 	await w.advance(25 * MINUTE)
-	expect(pomodoro.toolResult(true)).toBeDefined()
+	expect(pomodoro.toolResult(true).checkIn).toBeDefined()
 	pomodoro.turnEnded()
 	await pomodoro.reply('Pomodoro: the next turn.')
 	expect(texts(w.store.checkIns)).toEqual(['Pomodoro: on the goal.'])
@@ -404,7 +442,7 @@ test('the summary is the first paragraph that starts with Pomodoro:, and nothing
 		'Ran the tests.\n\n**Pomodoro:** on the goal, the parser is next.\nTake a break.\n\n Pomodoro: again.',
 	)
 	await w.advance(25 * MINUTE)
-	expect(pomodoro.toolResult(true)).toBeDefined()
+	expect(pomodoro.toolResult(true).checkIn).toBeDefined()
 	await pomodoro.reply('## Pomodoro check-in: done so far.')
 	expect(texts(w.store.checkIns)).toEqual([
 		'Pomodoro: on the goal, the parser is next.\nTake a break.',
@@ -472,7 +510,7 @@ test('quiet keeps counting with no alert or check-in, and the alert comes as soo
 	expect(w.label()).toBe('🍅 quiet · 1 of 4 · 20/25m')
 	await w.set(T0 + 60 * MINUTE)
 	expect(w.notified).toEqual([])
-	expect(pomodoro.toolResult(true)).toBeUndefined()
+	expect(pomodoro.toolResult(true)).toEqual({})
 	expect(w.shows.at(-1)).toEqual({
 		label: '🍅 quiet · 3 of 4 · 10/25m',
 		warning: undefined,
@@ -486,7 +524,7 @@ test('quiet keeps counting with no alert or check-in, and the alert comes as soo
 		label: '🍅 3 of 4 · 10/25m',
 		warning: '🍅 60m, time for a break',
 	})
-	expect(pomodoro.toolResult(true)).toBeDefined()
+	expect(pomodoro.toolResult(true).checkIn).toBeDefined()
 })
 
 // Even when the last alert was a minute before quiet began.
@@ -774,7 +812,7 @@ test("a check-in due before the Mac slept isn't sent after it wakes", async () =
 	// Asleep for an hour: on waking, a tool call comes before the minute's tick.
 	w.sleep(60 * MINUTE)
 	await pomodoro.activity(true)
-	expect(pomodoro.toolResult(true)).toBeUndefined()
+	expect(pomodoro.toolResult(true)).toEqual({})
 	expect(w.label()).toBe('🍅 on a break')
 })
 
@@ -1055,10 +1093,12 @@ test('the check-in at the end of a set asks for the long break', async () => {
 	const w = world()
 	const pomodoro = start(w)
 	await w.set(T0 + 26 * MINUTE)
-	expect(pomodoro.toolResult(true)).toEndWith('Remind them to take a break.')
+	expect(pomodoro.toolResult(true).checkIn).toEndWith(
+		'Remind them to take a break.',
+	)
 	// 100 minutes straight: four pomodoros.
 	await w.set(T0 + 101 * MINUTE)
-	expect(pomodoro.toolResult(true)).toEndWith(
+	expect(pomodoro.toolResult(true).checkIn).toEndWith(
 		"Remind them to take a 15 to 30 minute break: that's 4 pomodoros.",
 	)
 })

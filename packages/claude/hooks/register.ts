@@ -4,7 +4,6 @@ import {
 	createInstance,
 	type Host,
 	type Instance,
-	notice,
 	type Settings,
 	settingsFrom,
 } from './core'
@@ -121,30 +120,28 @@ export const register: Register = (on, options) => {
 		return next(e)
 	})
 
-	// A tool call counts as the main loop's activity as it starts and as it ends, not while it waits. The check rides a
-	// tool result of the main loop: Claude reads it mid-turn, and it never waits in an idle session.
+	// A tool call counts as the main loop's activity as it starts and as it ends, not while it waits. The check-in and the
+	// heads-up ride a tool result of the main loop: Claude reads them mid-turn, the person doesn't, and they never wait in
+	// an idle session.
 	on('tool.call', async ($, e, next) => {
 		const isMain = e.agentId === undefined
 		await instance?.activity(isMain)
 		const ran = await next(e)
 		await instance?.activity(isMain)
 		if (ran.deny !== undefined) return ran
-		const checkIn = instance?.toolResult(isMain)
-		if (checkIn === undefined) return ran
-		void $.session
-			.append({
-				message: {
-					type: 'system',
-					content: [
-						{
-							type: 'text',
-							text: notice(settings, language),
-						},
-					],
-				},
-			})
-			.catch(() => {})
-		return { ...ran, context: [...(ran.context ?? []), checkIn] }
+		const { checkIn, notice, headsUp } = instance?.toolResult(isMain) ?? {}
+		if (notice !== undefined)
+			void $.session
+				.append({
+					message: {
+						type: 'system',
+						content: [{ type: 'text', text: notice }],
+					},
+				})
+				.catch(() => {})
+		const notes = [checkIn, headsUp].filter((note) => note !== undefined)
+		if (notes.length === 0) return ran
+		return { ...ran, context: [...(ran.context ?? []), ...notes] }
 	})
 
 	// A response, which is activity; the main loop's may hold the summary.

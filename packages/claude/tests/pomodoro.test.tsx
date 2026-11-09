@@ -150,7 +150,9 @@ const start = ($: Engine) =>
 // Not a literal: Claude Code 2.1.304's test kit passes `agentId` on but doesn't declare it.
 const checked = async ($: Engine, agentId?: string) => {
 	const call = { tool: 'Bash' as const, command: 'ls', agentId }
-	return JSON.stringify(await $.tool.call(call)).includes('[Pomodoro]')
+	return JSON.stringify(await $.tool.call(call)).includes(
+		'[Pomodoro] The user has been working',
+	)
 }
 
 // The end of the main loop's turn, answered or interrupted, or of a subagent's run with `agentId`.
@@ -327,6 +329,21 @@ test('the check-in rides the next tool result, once per pomodoro, and never wait
 	await clock.advance(MIN)
 	expect(labels.at(-1)).toBe('🍅 3 of 4 · 0/25m')
 	expect(await checked($)).toBe(false)
+})
+
+// For Claude alone: nothing of it shows in the conversation.
+test("the heads-up rides a tool result's context 5 minutes before the pomodoro ends, once", async ($, on) => {
+	const { clock, session } = world(on, () => 0)
+	await start($)
+	const call = { tool: 'Bash' as const, command: 'ls' }
+	await clock.advance(19 * MIN)
+	expect((await $.tool.call(call)).context).toBeUndefined()
+	await clock.advance(MIN)
+	expect((await $.tool.call(call)).context).toEqual([
+		"[Pomodoro] The user's pomodoro ends in about 5 minutes. Bring the current step to a stopping point, and don't start anything big.",
+	])
+	expect((await $.tool.call(call)).context).toBeUndefined()
+	expect(session.appended()).toEqual([])
 })
 
 // The check-in is for Claude's own loop, and a denied call returns no result to carry it.

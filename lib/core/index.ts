@@ -46,7 +46,8 @@ export function settingsFrom(json: unknown): Settings | { problems: string[] } {
 // One session's own: the main loop's last activity; its last look at ioreg, and the latest input of each look that saw
 // input in the last minute; the last input that counts (undefined: no look yet); when the person came back from the
 // latest break, by the first look of the run that made input count again; since when the screen is locked, from the
-// first tick that saw it; the check-in now due, the last one sent, and whether the summary it asked for is still to log.
+// first tick that saw it; the check-in now due, the last one sent, and whether the summary it asked for is still to log;
+// the heads-up now due and the last one sent, each by when its pomodoro ends.
 type State = {
 	lastActivity: number
 	lookedAt?: number
@@ -57,6 +58,8 @@ type State = {
 	due?: { key: number; text: string }
 	sentKey?: number
 	awaitingSummary: boolean
+	headsUp?: number
+	headsUpKey?: number
 }
 
 type Event =
@@ -84,19 +87,22 @@ type Effect =
 	| { type: 'toast'; text: string }
 	// Add `text` to this tool result.
 	| { type: 'checkIn'; key: number; text: string }
+	// Tell the agent `text` with this tool result, where the person doesn't see it.
+	| { type: 'headsUp'; text: string }
 	// Add the summary to the log.
 	| { type: 'log'; text: string }
 
 export const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
 // A pomodoro; the time away that makes a break, and a long one; the pomodoros of a set; how often the alert repeats; the
-// time away after which it's skipped.
+// time away after which it's skipped; how long before a pomodoro ends the heads-up comes.
 const POMODORO = 25 * MINUTE
 const SHORT_BREAK = 3 * MINUTE
 const LONG_BREAK = 15 * MINUTE
 const SET = 4
 const REPEAT = 5 * MINUTE
 const AWAY = 2 * MINUTE
+const AHEAD = 5 * MINUTE
 // How often the instance looks at the input idle time, and how many looks within a minute must see input for it to
 // count: a stray key, a click or a jiggler's nudge is one look.
 const LOOK = 10_000
@@ -167,8 +173,13 @@ export type Instance = {
 	// A prompt, a reply, or a tool call as it starts or ends; only the main loop's is the person being there. A prompt the
 	// person submitted is their own input too.
 	activity: (isMain: boolean, byPerson?: boolean) => Promise<void>
-	// The check-in to add to this tool result, if it's of the main loop and one is due: once per pomodoro.
-	toolResult: (isMain: boolean) => string | undefined
+	// What goes with this tool result, if it's of the main loop: the check-in once a pomodoro is up, with the line that
+	// tells the person, and the heads-up shortly before it ends, for the agent alone. Each once per pomodoro.
+	toolResult: (isMain: boolean) => {
+		checkIn?: string
+		notice?: string
+		headsUp?: string
+	}
 	// A finished response of the main loop, which may hold the summary.
 	reply: (text: string) => Promise<void>
 	// The end of the main loop's turn (in Pi, the run).
@@ -311,10 +322,14 @@ export function createInstance(
 			if (isMain) feed({ type: 'activity', now, byPerson })
 		},
 		toolResult(isMain) {
-			const [checkIn] = feed({ type: 'toolResult', isMain })
-			if (checkIn?.type !== 'checkIn') return undefined
-			host.keep(checkIn.key)
-			return checkIn.text
+			const notes: ReturnType<Instance['toolResult']> = {}
+			for (const effect of feed({ type: 'toolResult', isMain }))
+				if (effect.type === 'checkIn') {
+					host.keep(effect.key)
+					notes.checkIn = effect.text
+					notes.notice = `${tomato(settings)}${messages[language].notice}`
+				} else if (effect.type === 'headsUp') notes.headsUp = effect.text
+			return notes
 		},
 		async reply(text) {
 			for (const effect of feed({ type: 'reply', text }))
@@ -345,13 +360,14 @@ const check = (minutes: number, isSetUp: boolean) =>
 		? "Remind them to take a 15 to 30 minute break: that's 4 pomodoros."
 		: 'Remind them to take a break.')
 
+// So the agent comes to a stopping point as the pomodoro ends.
+const HEADS_UP =
+	"[Pomodoro] The user's pomodoro ends in about 5 minutes. Bring the current step to a stopping point, and don't start " +
+	'anything big.'
+
 // 🍅 before a line, unless the setting turns it off; `word` stands in where the line needs a name to make sense.
 const tomato = (settings: Settings, word = '') =>
 	settings.emoji ? '🍅 ' : word
-
-// What the person reads once the check-in went out, the same in every agent.
-export const notice = (settings: Settings, language: Language) =>
-	`${tomato(settings)}${messages[language].notice}`
 
 // Exported for its tests, which read the state an instance keeps to itself.
 export function step(
@@ -475,7 +491,12 @@ function tick(
 	// stretch before it and the set are kept for the return; quiet isn't.
 	if (idle >= SHORT_BREAK)
 		return {
-			state: { ...state, due: undefined, backAt: undefined },
+			state: {
+				...state,
+				due: undefined,
+				headsUp: undefined,
+				backAt: undefined,
+			},
 			effects: [
 				{
 					type: 'persist',
@@ -574,29 +595,40 @@ function tick(
 			mark: tomato(settings),
 			sound: settings.sound,
 		})
-	// One check-in per pomodoro that ends without a break, keyed by when that pomodoro ended.
+	// One check-in per pomodoro that ends without a break, keyed by when that pomodoro ended; one heads-up per pomodoro in
+	// its last minutes, keyed by when it ends, except while quiet.
 	const due = isDue
 		? {
 				key: blockStart + Math.floor(worked / POMODORO) * POMODORO,
 				text: check(minutes, isSetUp),
 			}
 		: undefined
-	return { state: { ...state, due }, effects }
+	const headsUp =
+		worked % POMODORO >= POMODORO - AHEAD && !isQuiet
+			? blockStart + (Math.floor(worked / POMODORO) + 1) * POMODORO
+			: undefined
+	return { state: { ...state, due, headsUp }, effects }
 }
 
-// The check-in rides a tool result of the main loop, once per pomodoro. It counts as sent from here, so two tool
-// results at once can't both carry it.
+// The check-in and the heads-up ride a tool result of the main loop, each once per pomodoro. Each counts as sent from
+// here, so two tool results at once can't both carry it.
 function toolResult(
 	state: State,
 	isMain: boolean,
 ): { state: State; effects: Effect[] } {
-	const { due } = state
-	if (!isMain || due === undefined || due.key === state.sentKey)
-		return { state, effects: [] }
-	return {
-		state: { ...state, sentKey: due.key, awaitingSummary: true },
-		effects: [{ type: 'checkIn', ...due }],
+	if (!isMain) return { state, effects: [] }
+	const { due, headsUp } = state
+	let next = state
+	const effects: Effect[] = []
+	if (due !== undefined && due.key !== state.sentKey) {
+		next = { ...next, sentKey: due.key, awaitingSummary: true }
+		effects.push({ type: 'checkIn', ...due })
 	}
+	if (headsUp !== undefined && headsUp !== state.headsUpKey) {
+		next = { ...next, headsUpKey: headsUp }
+		effects.push({ type: 'headsUp', text: HEADS_UP })
+	}
+	return { state: next, effects }
 }
 
 // The summary can come in any response after the check-in, mid-task too, until the turn ends.

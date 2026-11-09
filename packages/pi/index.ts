@@ -11,7 +11,6 @@ import {
 	DEFAULTS,
 	type Host,
 	type Instance,
-	notice,
 	type Settings,
 	settingsFrom,
 } from './core'
@@ -145,13 +144,21 @@ export default function (pi: ExtensionAPI) {
 		await instance?.activity(e.parentToolCallId === undefined)
 	})
 
-	// The check rides a tool result of the agent's own: it reads it mid-run, and it never waits in an idle session.
+	// The check-in and the heads-up ride a tool result of the agent's own: it reads them mid-run, and they never wait in an
+	// idle session.
 	pi.on('tool_result', async (e, ctx) => {
 		const isMain = e.parentToolCallId === undefined
 		await instance?.activity(isMain)
-		const checkIn = instance?.toolResult(isMain)
+		const { checkIn, notice, headsUp } = instance?.toolResult(isMain) ?? {}
+		// Pi shows a tool result's text, so the heads-up is a message the screen doesn't show. It goes with the run's next
+		// request to the model, and doesn't make one of its own.
+		if (headsUp !== undefined)
+			pi.sendMessage(
+				{ customType: 'pomodoro', content: headsUp, display: false },
+				{ triggerTurn: false },
+			)
+		if (notice !== undefined) ctx.ui.notify(notice, 'info')
 		if (checkIn === undefined) return
-		ctx.ui.notify(notice(settings, language), 'info')
 		// Replacing the content drops the structured content unless it comes back too.
 		return {
 			content: [...e.content, { type: 'text', text: checkIn }],
