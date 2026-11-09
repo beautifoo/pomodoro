@@ -218,15 +218,11 @@ test('a closed lid clears the status line: the pomodoro that starts on waking is
 	await w.advance(25 * MINUTE)
 	expect(w.shows.at(-1)?.warning).toBe('🍅 25m, time for a break')
 
-	// Asleep for 10 minutes, so no tick ran, and the keyboard was touched on waking. The last input the timer holds, from
-	// the tick at 25, is 10 seconds short of the pomodoro, which doesn't count.
-	w.store.timer = {
-		...(w.store.timer as object),
-		seenAt: w.now() - 10 * MINUTE,
-	}
+	// Asleep for 10 minutes, and the keyboard was touched on waking: the pomodoro up before it counts.
+	w.sleep(10 * MINUTE)
 	await w.advance(MINUTE)
 	expect(w.shows.at(-1)).toEqual({
-		label: '🍅 1 of 4 · 0/25m',
+		label: '🍅 2 of 4 · 0/25m',
 		warning: undefined,
 	})
 })
@@ -870,7 +866,7 @@ test("after the fourth the alert asks for the long break, and a short break does
 	const short =
 		'🍅 25 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.'
 	const long =
-		"🍅 25 minutes without a break. That's 4 pomodoros: take a 15 to 30 minute break."
+		'🍅 25 minutes without a break. Your set of 4 pomodoros is done: take a 15 to 30 minute break.'
 	await w.set(at(116))
 	expect(w.notified).toEqual([short, short, short, long])
 	expect(w.shows.at(-1)?.warning).toBe('🍅 25m, time for a long break')
@@ -900,6 +896,51 @@ test('a closed lid for 15 minutes or more is a long break', async () => {
 		expect(w.label()).toBe('🍅 2 of 4 · 5/25m')
 		w.sleep(closed * MINUTE)
 		await w.advance(MINUTE)
+		expect(w.label()).toBe(label)
+	}
+})
+
+// The minute's tick comes up to a minute after waking, and three looks of the input after it count in 20 seconds; the
+// break still begins at the last input before the lid closed.
+test('a lid closed right after a pomodoro keeps it, and under 15 minutes keeps the set', async () => {
+	for (const [closedAt, closed] of [
+		[25 * MINUTE + 10_000, 5],
+		[30 * MINUTE + 10_000, 14.5],
+	] as const) {
+		const openedAt = T0 + closedAt + closed * MINUTE
+		const w = world({
+			idle: inputs([
+				...steady(T0, T0 + closedAt),
+				...steady(openedAt, openedAt + 5 * MINUTE),
+			]),
+		})
+		start(w)
+		await w.set(T0 + closedAt)
+		w.sleep(closed * MINUTE)
+		await w.advance(MINUTE)
+		expect(w.label()).toBe('🍅 2 of 4 · 0/25m')
+	}
+})
+
+test('no session open for 15 minutes or more is a long break', async () => {
+	for (const [gap, label] of [
+		[20, '🍅 1 of 4 · 0/25m'],
+		[5, '🍅 3 of 4 · 0/25m'],
+	] as const) {
+		// One pomodoro of the set done, and 45 minutes into the next stretch when the last session closed.
+		const closedAt = T0 - gap * MINUTE
+		const w = world({
+			seed: {
+				timer: {
+					blockStart: closedAt - 45 * MINUTE,
+					done: 1,
+					seenAt: closedAt,
+					lastInput: closedAt,
+				},
+			},
+		})
+		start(w)
+		await w.settle()
 		expect(w.label()).toBe(label)
 	}
 })

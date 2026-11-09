@@ -190,9 +190,11 @@ export function createInstance(
 	let cancelLooks: (() => void) | undefined
 	let cancelWake: (() => void) | undefined
 	let isStopped = false
-	// When the last tick began. A sleeping Mac stops the clock's timers, so the first activity after it wakes can come
-	// before the first tick.
+	// When the last tick began. A sleeping Mac stops the clock's timers, so the first look or activity after it wakes can
+	// come before the first tick: then the tick comes first.
 	let lastTickAt = 0
+	const isTickBehind = (now: number) =>
+		cancelClock !== undefined && !isStopped && now - lastTickAt >= SHORT_BREAK
 
 	// Moves the rhythm on by one event, and returns what to carry out, in order.
 	function feed(event: Event) {
@@ -201,9 +203,11 @@ export function createInstance(
 		return next.effects
 	}
 
-	// Where ioreg gives nothing (not macOS) there's no look, and the session's activity stands in.
+	// Where ioreg gives nothing (not macOS) there's no look, and the session's activity stands in. After a sleep the tick,
+	// which takes its own look, finds the break from the input before it, before looks of the input after it can count.
 	async function look() {
 		const now = await host.now()
+		if (isTickBehind(now)) return runTick()
 		const idleMs = ioregIdleMs(await host.run(IOREG, 5_000).catch(() => ''))
 		if (idleMs !== undefined) feed({ type: 'look', now, idleMs })
 	}
@@ -278,12 +282,7 @@ export function createInstance(
 		async activity(isMain, byPerson = false) {
 			const now = await host.now()
 			// After a sleep the tick comes first, so a check-in due before it isn't sent.
-			if (
-				cancelClock !== undefined &&
-				!isStopped &&
-				now - lastTickAt >= SHORT_BREAK
-			)
-				await runTick().catch(() => {})
+			if (isTickBehind(now)) await runTick().catch(() => {})
 			// A subagent's work isn't the person being there.
 			if (isMain) feed({ type: 'activity', now, byPerson })
 		},

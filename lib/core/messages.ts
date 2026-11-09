@@ -33,7 +33,7 @@ const en: Messages = {
 	alert: (minutes) =>
 		`${minutes} minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.`,
 	alertLong: (minutes) =>
-		`${minutes} minutes without a break. That's 4 pomodoros: take a 15 to 30 minute break.`,
+		`${minutes} minutes without a break. Your set of 4 pomodoros is done: take a 15 to 30 minute break.`,
 	notice: 'Pomodoro: told the agent your pomodoro is up.',
 }
 
