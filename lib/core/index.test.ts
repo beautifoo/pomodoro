@@ -1,14 +1,12 @@
 import { expect, test } from 'bun:test'
 import plugin from '../../packages/claude/.claude-plugin/plugin.json'
 import {
-	banner,
 	CHIME,
 	type CheckIn,
 	createInstance,
 	DEFAULTS,
 	type Host,
 	IOREG,
-	MINIMUM,
 	MINUTE,
 	type Settings,
 	settingsFrom,
@@ -18,70 +16,46 @@ const T0 = 1_700_000_000_000
 const DAY = 24 * 60 * MINUTE
 
 // Claude Code checks its settings against plugin.json, and both agents go through settingsFrom, which must agree.
-test("plugin.json's defaults and minimums are settingsFrom's", () => {
-	const fields = Object.entries(plugin.userConfig)
-	expect(
-		Object.fromEntries(fields.map(([key, f]) => [key, f.default])),
-	).toEqual(DEFAULTS)
+test("plugin.json's defaults are settingsFrom's", () => {
 	expect(
 		Object.fromEntries(
-			fields.flatMap(([key, f]) => ('min' in f ? [[key, f.min]] : [])),
+			Object.entries(plugin.userConfig).map(([key, f]) => [key, f.default]),
 		),
-	).toEqual(MINIMUM)
+	).toEqual(DEFAULTS)
 	expect(settingsFrom({})).toEqual(DEFAULTS)
-	for (const [key, field] of fields)
-		if ('min' in field) {
-			expect(settingsFrom({ [key]: field.min })).toEqual({
-				...DEFAULTS,
-				[key]: field.min,
-			})
-			expect(settingsFrom({ [key]: field.min - 0.5 })).toEqual({
-				problems: [`${key} must be at least ${field.min}`],
-			})
-		}
 })
 
-test('settingsFrom names every value of the wrong kind, takes an empty one as left out, and ignores keys it has no use for', () => {
+test('settingsFrom names every value of the wrong kind, takes an empty one as left out, and ignores the keys of older versions', () => {
 	expect(
-		settingsFrom({ workMinutes: '50', sound: 1, breakMinutes: 10 }),
-	).toEqual({
-		problems: ['workMinutes must be a number', 'sound must be a boolean'],
-	})
-	// JSON's 1e999.
-	expect(settingsFrom({ breakMinutes: Infinity })).toEqual({
-		problems: ['breakMinutes must be a number'],
+		settingsFrom({
+			workMinutes: 0,
+			breakMinutes: '',
+			moveSeconds: 'abc',
+			checkIn: false,
+			sound: false,
+		}),
+	).toEqual({ sound: false, emoji: true })
+	expect(settingsFrom({ sound: 1, emoji: 'no' })).toEqual({
+		problems: ['sound must be a boolean', 'emoji must be a boolean'],
 	})
 	for (const json of [[], null, 25])
 		expect(settingsFrom(json)).toEqual({
 			problems: ['the file must hold a JSON object'],
 		})
-	expect(settingsFrom({ breakMinutes: '', sound: '' })).toEqual(DEFAULTS)
-	expect(settingsFrom({ breakMinutes: 10, theme: 'dark' })).toEqual({
-		...DEFAULTS,
-		breakMinutes: 10,
-	})
-})
-
-test("the banner's AppleScript keeps quotes and backslashes as text", () => {
-	expect(banner('Say "hi" \\o/')).toEqual([
-		'osascript',
-		'-e',
-		'display notification "Say \\"hi\\" \\\\o/" with title "Pomodoro"',
-	])
+	expect(settingsFrom({ sound: '' })).toEqual(DEFAULTS)
+	expect(settingsFrom({ theme: 'dark' })).toEqual(DEFAULTS)
 })
 
 type Pending = { at: number; every?: number; fn: () => void }
 
 // An agent in memory: a clock at T0, the store (open to the test, which ages it to stand for a stretch with no tick),
 // ioreg reporting `idle(now)` (null: no ioreg), a watcher the test prints through, a repository at /code/app, the
-// agent's own alert answering `notify()`, and what the host was asked to do.
+// agent's own alert, and what the host was asked to do.
 function world({
 	idle = () => 0,
-	notify = async () => true,
 	seed = {},
 }: {
 	idle?: (now: number) => number | null
-	notify?: () => Promise<boolean>
 	seed?: Record<string, unknown>
 } = {}) {
 	let now = T0
@@ -126,9 +100,8 @@ function world({
 		show: (label, warning) => {
 			shows.push({ label, warning })
 		},
-		notify: (text, mark) => {
+		notify: async (text, mark) => {
 			notified.push(`${mark}${text}`)
-			return notify()
 		},
 		keep: (kept) => {
 			keeps.push(kept)
@@ -199,7 +172,7 @@ function start(
 	return pomodoro
 }
 
-// The chimes and banners the alerts ran.
+// The chimes the alerts ran.
 const sounds = (w: World) => w.runs.filter((argv) => argv[0] !== 'ioreg')
 
 const texts = (checkIns: unknown) => (checkIns as CheckIn[]).map((c) => c.text)
@@ -229,28 +202,6 @@ test('alerts when a pomodoro is up, then every break length while there is no br
 	])
 	// Ghostty shows the banner of the tab in front for a few seconds only, and a Focus silences it: each alert also chimes.
 	expect(sounds(w)).toEqual([CHIME, CHIME])
-})
-
-test("the osascript banner comes after the chime only when the agent's own alert raised none or failed", async () => {
-	const text =
-		'25 minutes without a break. Stand up and look away from the screen for 5.'
-	const ran = async (
-		notify: () => Promise<boolean>,
-		settings: Partial<Settings> = {},
-	) => {
-		const w = world({ notify })
-		start(w, settings)
-		await w.advance(25 * MINUTE)
-		expect(w.notified).toEqual([`🍅 ${text}`])
-		return sounds(w)
-	}
-	expect(await ran(async () => true)).toEqual([CHIME])
-	expect(await ran(async () => false)).toEqual([CHIME, banner(text)])
-	expect(await ran(() => Promise.reject(new Error('no terminal')))).toEqual([
-		CHIME,
-		banner(text),
-	])
-	expect(await ran(async () => false, { sound: false })).toEqual([banner(text)])
 })
 
 test('no chime when turned off', async () => {
@@ -325,20 +276,11 @@ test('a gap with no tick (sleep, no session open) counts as a break', async () =
 	expect(w.notified.length).toBe(1)
 })
 
-test('short settings still alert: 3-minute pomodoros, 1-minute breaks', async () => {
-	const w = world()
-	start(w, { workMinutes: 3, breakMinutes: 1 })
-	await w.advance(3 * MINUTE)
-	expect(w.notified).toEqual([
-		'🍅 3 minutes without a break. Stand up and look away from the screen for 1.',
-	])
-})
-
-// With 1-minute breaks every tick asks for a wake. With input half a second before each tick, the next minute's tick
-// comes before that wake and replaces it, so only the minute's ticks run.
-test("one wake is pending at most: with 1-minute breaks the ticks don't pile up while the person works", async () => {
-	const w = world({ idle: () => 500 })
-	start(w, { breakMinutes: 1 })
+// Idle for just over 4 minutes, every tick asks for a wake, the moment the break would start. With the next minute's tick
+// coming before that wake and replacing it, only the minute's ticks run.
+test("one wake is pending at most: the ticks don't pile up while a break is near", async () => {
+	const w = world({ idle: () => 4 * MINUTE + 500 })
+	start(w)
 	await w.settle()
 	const before = w.shows.length
 	await w.advance(10 * MINUTE)
@@ -348,8 +290,8 @@ test("one wake is pending at most: with 1-minute breaks the ticks don't pile up 
 })
 
 test('stop cancels the clock and the wake and ends the watcher, and no tick runs after it', async () => {
-	const w = world({ idle: () => 500 })
-	const pomodoro = start(w, { breakMinutes: 1 })
+	const w = world({ idle: () => 4 * MINUTE + 500 })
+	const pomodoro = start(w)
 	await w.settle()
 	expect(w.pending()).toBe(2)
 	pomodoro.stop()
@@ -361,8 +303,8 @@ test('stop cancels the clock and the wake and ends the watcher, and no tick runs
 
 	// Stopped while its first tick is under way: that tick carries out nothing, so a session that took its place doesn't
 	// see its count.
-	const early = world({ idle: () => 500 })
-	start(early, { breakMinutes: 1 }).stop()
+	const early = world({ idle: () => 4 * MINUTE + 500 })
+	start(early).stop()
 	await early.advance(10 * MINUTE)
 	expect(early.shows.length).toBe(0)
 	expect(early.store.timer).toBeUndefined()
@@ -382,14 +324,6 @@ test('over SSH no watcher starts and ioreg never runs: activity stands in', asyn
 		'🍅 on a break',
 		'🍅 0/25m',
 	])
-})
-
-test('no check-in when turned off', async () => {
-	const w = world()
-	const pomodoro = start(w, { checkIn: false })
-	await w.advance(26 * MINUTE)
-	expect(w.notified.length).toBe(1)
-	expect(pomodoro.toolResult(true)).toBeUndefined()
 })
 
 test("one check-in per pomodoro, on a main-loop tool result, kept so that a reloaded instance gives only the next pomodoro's", async () => {
@@ -542,15 +476,7 @@ test("a mouse jiggler's nudge doesn't keep a break from starting", async () => {
 	expect(w.label()).toBe('🍅 0/25m')
 })
 
-test('with moveSeconds 0, every movement counts, the nudge included', async () => {
-	const w = world()
-	w.watch(jiggledDay())
-	start(w, { moveSeconds: 0 })
-	await w.set(T0 + 35 * MINUTE)
-	expect(w.label()).toBe('🍅 35/25m')
-})
-
-test('mouse movement counts once it lasts moveSeconds, not before', async () => {
+test('mouse movement counts once it lasts a second, not before', async () => {
 	// The input before the watcher started, a second in, then a stretch of movement a minute in: 1 s, or just under.
 	const after = async (stretch: number[]) => {
 		const w = world()

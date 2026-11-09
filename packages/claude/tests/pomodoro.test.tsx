@@ -1,20 +1,17 @@
-import type { On, UiNotifyResult } from 'claude-code'
+import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 import { expect, mock, test } from 'claude-code/testing'
 
 const T0 = 1_700_000_000_000
 const MIN = 60_000
 
-const SENT: UiNotifyResult = { isSent: true, channel: 'ghostty' }
-
 // The engine beneath the mod: a clock, a store, ioreg reporting `idle(now)` (null: no ioreg), the terminal's
-// answer to a notification, a repository at /code/app, and recorders. `notified` holds every banner, `viaOsascript` those osascript posted,
+// notification, a repository at /code/app, and recorders. `notified` holds every banner, `osascripts` those osascript was asked for,
 // `labels` each count written for the prompt footer.
 const world = (
 	on: On,
 	idle: (now: number) => number | null,
 	seed?: Record<string, unknown>,
-	notify: UiNotifyResult = SENT,
 ) => {
 	const clock = mock.clock(on, { now: T0 })
 	// The mod's store, open to the test.
@@ -27,7 +24,7 @@ const world = (
 	mock.env(on, {})
 	const session = mock.session(on)
 	const notified: string[] = []
-	const viaOsascript: string[] = []
+	const osascripts: (readonly string[])[] = []
 	const status: (string | undefined)[] = []
 	const labels: string[] = []
 	const chimes: number[] = []
@@ -75,12 +72,7 @@ const world = (
 	}
 	on('process.run', (_, e) => {
 		if (e.argv[0] === 'afplay') chimes.push(clock.now())
-		if (e.argv[0] === 'osascript') {
-			const text =
-				e.argv[2]?.match(/display notification "(.*)" with title/)?.[1] ?? ''
-			notified.push(text)
-			viaOsascript.push(text)
-		}
+		if (e.argv[0] === 'osascript') osascripts.push(e.argv)
 		// The Mac's languages: none.
 		if (e.argv[0] === 'defaults')
 			return {
@@ -104,8 +96,8 @@ const world = (
 		}
 	})
 	on('ui.notify', (_, e) => {
-		if (notify.isSent) notified.push(e.text)
-		return { value: notify }
+		notified.push(e.text)
+		return { value: { isSent: true, channel: 'ghostty' } }
 	})
 	const toasts: string[] = []
 	on('ui.toast', (_, e) => {
@@ -125,7 +117,7 @@ const world = (
 		store,
 		session,
 		notified,
-		viaOsascript,
+		osascripts,
 		status,
 		labels,
 		toasts,
@@ -230,28 +222,15 @@ test('a session with nobody at its prompt never counts: -p, VS Code, the desktop
 	expect(await checked($)).toBe(false)
 })
 
-test('the banner goes through the terminal, osascript only where the terminal cannot raise one', async ($, on) => {
-	const { clock, notified, viaOsascript } = world(on, () => 0, undefined, {
-		isSent: false,
-		reason: 'no-channel',
-	})
+test("the alert goes through the terminal's notification, and nothing else posts a banner", async ($, on) => {
+	const { clock, notified, chimes, osascripts } = world(on, () => 0)
 	await start($)
 	await clock.advance(25 * MIN)
 	expect(notified).toEqual([
 		'25 minutes without a break. Stand up and look away from the screen for 5.',
 	])
-	expect(viaOsascript.length).toBe(1)
-})
-
-test('no osascript banner when Claude Code notifications are turned off', async ($, on) => {
-	const { clock, notified, chimes } = world(on, () => 0, undefined, {
-		isSent: false,
-		reason: 'disabled',
-	})
-	await start($)
-	await clock.advance(25 * MIN)
-	expect(notified.length).toBe(0)
 	expect(chimes.length).toBe(1)
+	expect(osascripts).toEqual([])
 })
 
 test('the check-in rides the next tool result, once per pomodoro, and never waits in an idle session', async ($, on) => {
@@ -329,44 +308,15 @@ test('a reload does not repeat the check-in the session was given', async ($, on
 	expect(sent).toEqual([T0 + 24 * MIN])
 })
 
-// With 1-minute breaks every tick asks for a wake. With input half a second before each tick, the next minute's tick
-// comes before that wake and replaces it, so only the minute's ticks run.
+// A removed setting reaches the plugin as it was in settings.json: unchecked, and of any type.
 test(
-	"a wake replaces the one before: with 1-minute breaks the ticks don't pile up while the person works",
-	{ options: { breakMinutes: 1 } },
+	'a removed setting left in settings.json is ignored',
+	{ options: { workMinutes: 0, moveSeconds: 'abc' } },
 	async ($, on) => {
-		const { clock, labels } = world(on, () => 500)
+		const { clock, labels } = world(on, () => 0)
 		await start($)
 		await clock.settle()
-		const before = labels.length
-		await clock.advance(10 * MIN)
-		expect(labels.length - before).toBe(10)
-	},
-)
-
-// Claude Code refuses it in /config too. A pomodoro of 0 minutes would put the check-in on every tool result.
-test(
-	'a setting below its minimum fails the load, naming the setting',
-	{ options: { workMinutes: 0 } },
-	async ($, on) => {
-		world(on, () => 0)
-		await expect(start($)).rejects.toThrow(
-			'Pomodoro (minutes) must be at least 1',
-		)
-	},
-)
-
-// Claude Code's check takes it as unset, then hands it to the plugin.
-test(
-	'an empty setting takes its default',
-	{ options: { breakMinutes: '' } },
-	async ($, on) => {
-		const { clock, notified } = world(on, () => 0)
-		await start($)
-		await clock.advance(25 * MIN)
-		expect(notified).toEqual([
-			'25 minutes without a break. Stand up and look away from the screen for 5.',
-		])
+		expect(labels.at(-1)).toBe('🍅 0/25m')
 	},
 )
 

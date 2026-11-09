@@ -8,15 +8,7 @@
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import {
-	banner,
-	CHIME,
-	type CheckIn,
-	DEFAULTS,
-	IOREG,
-	MINUTE,
-	type Timer,
-} from '../lib/core'
+import { CHIME, type CheckIn, IOREG, MINUTE, type Timer } from '../lib/core'
 
 const pi = resolve('packages/pi/node_modules/@earendil-works/pi-coding-agent')
 const { version, bin } = await Bun.file(`${pi}/package.json`).json()
@@ -125,7 +117,7 @@ async function run(
 	if (earlier === undefined) {
 		const now = Date.now()
 		const seeded: Timer = {
-			blockStart: now - DEFAULTS.workMinutes * MINUTE,
+			blockStart: now - 25 * MINUTE,
 			seenAt: now,
 			alertedAt: 0,
 		}
@@ -218,7 +210,6 @@ async function run(
 
 // A settings file holding `text`.
 const file = (text: string) => (path: string) => writeFile(path, text)
-const alert = `${DEFAULTS.workMinutes} minutes without a break. Stand up and look away from the screen for ${DEFAULTS.breakMinutes}.`
 const off = {
 	seen: [false, false],
 	ticked: false,
@@ -238,7 +229,7 @@ for (const [settings, expected, what] of [
 			ticked: true,
 			alerted: true,
 			logged: ['Pomodoro: wrote a.txt and b.txt.'],
-			calls: [IOREG, CHIME, banner(alert)],
+			calls: [IOREG, CHIME],
 			crashed: false,
 		},
 		'came due with a tick that alerted, rode the first tool result, reached the model once, and its summary was logged',
@@ -257,7 +248,24 @@ for (const [settings, expected, what] of [
 		},
 		"wasn't given again in a run that continued the session that got it",
 	],
-	[file('{ "workMinutes": 0 }'), off, 'stayed off with workMinutes 0'],
+	// A setting of an older version is ignored, and the timer runs.
+	[
+		file('{ "workMinutes": 0 }'),
+		{
+			seen: [true, false],
+			ticked: true,
+			alerted: true,
+			logged: ['Pomodoro: wrote a.txt and b.txt.'],
+			calls: [IOREG, CHIME],
+			crashed: false,
+		},
+		'ran with a setting of an older version in its file',
+	],
+	[
+		file('{ "sound": "yes" }'),
+		off,
+		'stayed off with a sound that is not a boolean',
+	],
 	[file('{ "workMinutes": 50'), off, 'stayed off with a broken file'],
 	[
 		(path: string) => mkdir(path),

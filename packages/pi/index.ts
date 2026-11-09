@@ -107,10 +107,9 @@ export default function (pi: ExtensionAPI) {
 		},
 		// One status entry: the count, or that a break is due.
 		show: (label, warning) => ui?.setStatus('pomodoro', warning ?? label),
-		// Pi has no desktop notification of its own: core's osascript posts the banner (macOS).
+		// Pi has no desktop notification of its own: the alert is the in-app one, and core's chime.
 		notify: async (text, mark) => {
 			ui?.notify(`${mark}${text}`, 'warning')
-			return false
 		},
 		keep: (kept) => pi.appendEntry(KEPT, kept),
 	})

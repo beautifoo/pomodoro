@@ -61,17 +61,10 @@ function host($: EngineInterface): Host {
 			void $.state.set(LABEL, label).catch(() => {})
 			$.ui.status(warning)
 		},
-		// osascript only where the terminal can't raise one; notifications turned off stay off (macOS).
+		// The toast, and the terminal's own notification if it has one.
 		notify: async (text, mark) => {
 			$.ui.toast(`${mark}${text}`, { timeoutMs: 15_000 })
-			const sent = await $.ui
-				.notify(text, { title: 'Pomodoro' })
-				.catch(() => undefined)
-			return (
-				sent !== undefined &&
-				(sent.isSent ||
-					(sent.reason !== 'no-channel' && sent.reason !== 'no-surface'))
-			)
+			await $.ui.notify(text, { title: 'Pomodoro' }).catch(() => {})
 		},
 		keep: (kept) => void $.state.set(KEPT, kept).catch(() => {}),
 	}

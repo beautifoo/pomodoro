@@ -13,24 +13,13 @@ export type Timer = {
 }
 // The agent's summary at a check-in, kept for /pomodoro today.
 export type CheckIn = { at: number; repo: string | null; text: string }
-// The Claude plugin's plugin.json declares the same defaults and minimums.
-export const DEFAULTS = {
-	workMinutes: 25,
-	breakMinutes: 5,
-	moveSeconds: 1,
-	sound: true,
-	checkIn: true,
-	emoji: true,
-}
+// The Claude plugin's plugin.json declares the same defaults.
+export const DEFAULTS = { sound: true, emoji: true }
 export type Settings = Readonly<typeof DEFAULTS>
-export const MINIMUM: Partial<Record<keyof Settings, number>> = {
-	workMinutes: 1,
-	breakMinutes: 1,
-	moveSeconds: 0,
-}
 
 // The settings in a file's JSON or Claude Code's options, with the defaults for the keys left out or empty; or what's
-// wrong with them, as Claude Code checks a plugin's options: then neither agent runs the timer.
+// wrong with them, as Claude Code checks a plugin's options: then neither agent runs the timer. Other keys, such as
+// the timings of an older version, are ignored.
 export function settingsFrom(json: unknown): Settings | { problems: string[] } {
 	if (typeof json !== 'object' || json === null || Array.isArray(json))
 		return { problems: ['the file must hold a JSON object'] }
@@ -39,17 +28,9 @@ export function settingsFrom(json: unknown): Settings | { problems: string[] } {
 	const problems: string[] = []
 	for (const key of Object.keys(DEFAULTS) as (keyof Settings)[]) {
 		const value = file[key]
-		const min = MINIMUM[key]
 		// Claude Code's check skips an empty value, then hands it on.
 		if (value === undefined || value === '') continue
-		// JSON's 1e999 is Infinity, which Claude Code refuses.
-		if (
-			typeof value !== typeof DEFAULTS[key] ||
-			(typeof value === 'number' && !Number.isFinite(value))
-		)
-			problems.push(`${key} must be a ${typeof DEFAULTS[key]}`)
-		else if (min !== undefined && (value as number) < min)
-			problems.push(`${key} must be at least ${min}`)
+		if (typeof value !== 'boolean') problems.push(`${key} must be a boolean`)
 		else settings[key] = value
 	}
 	return problems.length > 0 ? { problems } : (settings as Settings)
@@ -96,6 +77,13 @@ type Effect =
 
 export const MINUTE = 60_000
 const DAY = 24 * 60 * MINUTE
+// A pomodoro; the break that ends it, and that the alert repeats after; the time away after which the alert is skipped.
+const POMODORO = 25 * MINUTE
+const BREAK = 5 * MINUTE
+const REPEAT = 5 * MINUTE
+const AWAY = 2 * MINUTE
+// Mouse movement counts once it has lasted this long.
+const MOVE = 1_000
 // Movement less than this apart is one stretch; the watcher looks 4 times a second.
 const STRETCH_GAP = 1_000
 
@@ -135,13 +123,8 @@ function ioregIdleMs(stdout: string) {
 	return ns === undefined ? undefined : Number(ns) / 1e6
 }
 
-// An alert's chime, and the banner osascript posts (macOS); the text's quotes and backslashes stay text in AppleScript.
+// An alert's chime (macOS).
 export const CHIME = ['afplay', '/System/Library/Sounds/Glass.aiff']
-export const banner = (text: string) => [
-	'osascript',
-	'-e',
-	`display notification "${text.replace(/["\\]/g, '\\$&')}" with title "Pomodoro"`,
-]
 
 // /pomodoro, which an instance answers.
 export const COMMAND = {
@@ -172,8 +155,8 @@ export type Host = {
 	repo: () => Promise<string | null>
 	// The count, and the warning while a break is due.
 	show: (label: string, warning?: string) => void
-	// The agent's own alert. True: it raised a desktop banner, or mustn't, so no osascript banner follows.
-	notify: (text: string, mark: string) => Promise<boolean>
+	// The agent's own alert.
+	notify: (text: string, mark: string) => Promise<void>
 	// What the session keeps across a reload, to hand back to createInstance.
 	keep: (kept: Kept) => void
 }
@@ -245,12 +228,11 @@ export function createInstance(
 		)
 	}
 
-	// The agent's alert, the chime, and osascript's banner where the agent raised none (macOS).
+	// The agent's alert, then the chime.
 	async function alert(text: string, hasSound: boolean, mark: string) {
-		const isRaised = await host.notify(text, mark).catch(() => false)
+		await host.notify(text, mark).catch(() => {})
 		// Ghostty shows the banner of the tab in front for a few seconds only, and a Focus silences it; not a chime.
 		if (hasSound) await host.run(CHIME).catch(() => {})
-		if (!isRaised) await host.run(banner(text)).catch(() => {})
 	}
 
 	async function runTick() {
@@ -357,7 +339,7 @@ function step(
 			return { state: { ...state, lastActivity: event.now }, effects: [] }
 		case 'input':
 			return {
-				state: sawInput(state, event.line, settings.moveSeconds * 1_000),
+				state: sawInput(state, event.line, MOVE),
 				effects: [],
 			}
 		// It ended or never started: the system's idle time stands in, where every input counts.
@@ -412,8 +394,6 @@ function tick(
 	language: Language,
 ): { state: State; effects: Effect[] } {
 	const text = messages[language]
-	const workMs = settings.workMinutes * MINUTE
-	const breakMs = settings.breakMinutes * MINUTE
 	// Time since input that counts, from the watcher; else the system's input idle time; else time since this session's
 	// last activity.
 	const idleMs =
@@ -424,7 +404,7 @@ function tick(
 	const lastInput = Math.max(timer.lastInput ?? 0, now - idleMs)
 	const idle = now - lastInput
 
-	if (idle >= breakMs)
+	if (idle >= BREAK)
 		return {
 			state: { ...state, due: undefined },
 			effects: [
@@ -437,24 +417,24 @@ function tick(
 		}
 	const effects: Effect[] = []
 	// Ticks are a minute apart: look again the moment this stretch without input would become a break.
-	if (idle > breakMs - MINUTE)
-		effects.push({ type: 'wake', afterMs: breakMs - idle + 1_000 })
+	if (idle > BREAK - MINUTE)
+		effects.push({ type: 'wake', afterMs: BREAK - idle + 1_000 })
 
 	// No tick for a break's length (two ticks at least): the machine slept or no session was open.
 	const isGap =
 		timer.seenAt === undefined ||
-		now - timer.seenAt >= Math.max(breakMs, 2 * MINUTE)
+		now - timer.seenAt >= Math.max(BREAK, 2 * MINUTE)
 	const blockStart =
 		isGap || timer.blockStart === undefined ? now : timer.blockStart
 	const worked = now - blockStart
 	const minutes = Math.floor(worked / MINUTE)
-	const isDue = worked >= workMs
+	const isDue = worked >= POMODORO
 	const alertedAt = timer.alertedAt ?? 0
 	// Not once the person has been away a while: that may be the break already under way.
 	const shouldAlert =
 		isDue &&
-		idle < 2 * MINUTE &&
-		(alertedAt < blockStart || now - alertedAt >= breakMs)
+		idle < AWAY &&
+		(alertedAt < blockStart || now - alertedAt >= REPEAT)
 
 	effects.push(
 		{
@@ -468,7 +448,7 @@ function tick(
 		},
 		{
 			type: 'show',
-			label: `${tomato(settings, 'pomodoro ')}${text.count(minutes, settings.workMinutes)}`,
+			label: `${tomato(settings, 'pomodoro ')}${text.count(minutes, POMODORO / MINUTE)}`,
 			warning: isDue
 				? `${tomato(settings)}${text.warning(minutes)}`
 				: undefined,
@@ -477,18 +457,17 @@ function tick(
 	if (shouldAlert)
 		effects.push({
 			type: 'alert',
-			text: text.alert(minutes, breakMs / MINUTE),
+			text: text.alert(minutes, BREAK / MINUTE),
 			mark: tomato(settings),
 			sound: settings.sound,
 		})
 	// One check-in per pomodoro that ends without a break, keyed by when that pomodoro ended.
-	const due =
-		isDue && settings.checkIn
-			? {
-					key: blockStart + Math.floor(worked / workMs) * workMs,
-					text: check(minutes),
-				}
-			: undefined
+	const due = isDue
+		? {
+				key: blockStart + Math.floor(worked / POMODORO) * POMODORO,
+				text: check(minutes),
+			}
+		: undefined
 	return { state: { ...state, due }, effects }
 }
 
