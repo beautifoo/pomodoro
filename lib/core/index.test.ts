@@ -526,10 +526,25 @@ test('the tally counts pomodoros, long breaks, skipped breaks and the longest st
 test('without the emoji, the count of the day has no tomato', async () => {
 	const w = worldAt(NINE)
 	const pomodoro = start(w, { emoji: false })
-	await w.set(nine(25))
+	await w.set(nine(26))
 	expect(await pomodoro.command('today')).toBe(
-		'Today: 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 25m',
+		'Today: 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 26m',
 	)
+})
+
+// The tally counts what the set counts: the pomodoro up while the person was already away doesn't.
+test('a pomodoro cut short by a break is not in the tally', async () => {
+	// In use for 23 minutes, away for 5, and in use again.
+	const w = worldAt(NINE, {
+		idle: inputs([
+			...steady(nine(0), nine(23)),
+			...steady(nine(28) + 10_000, nine(30)),
+		]),
+	})
+	const pomodoro = start(w)
+	await w.set(nine(30))
+	expect(w.toasts).toEqual(['🍅 Back after 5m · pomodoro 1 of 4'])
+	expect(await pomodoro.command('today')).toBe('Today: no pomodoros yet.')
 })
 
 // Each counts for the repository of the session with the latest activity when it ended.
@@ -555,11 +570,38 @@ test("/pomodoro today counts only this repository's, and lists only its summarie
 	await web.activity(true)
 	await w.set(nine(76))
 	expect(await app.command('today')).toBe(
-		'Today: 🍅 2 pomodoros (yesterday 0), 0 long breaks, 1 break skipped, longest 76m\n09:26  Pomodoro: in app.',
+		'Today: 🍅 2 pomodoros (yesterday 0), 0 long breaks, 1 break skipped, longest 0m\n09:26  Pomodoro: in app.',
 	)
 	expect(await web.command('today')).toBe(
 		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 76m\n09:51  Pomodoro: in web.',
 	)
+})
+
+// A stretch ends when the person leaves: the agent's work in another repository during the break doesn't take it.
+test('a stretch and the break after it count for the repository in use before the break', async () => {
+	// In use in app for 75 minutes, away for 20 while the agent works in web, and in use again.
+	const w = worldAt(NINE, {
+		idle: inputs([
+			...steady(nine(0), nine(75)),
+			...steady(nine(95) + 10_000, nine(97)),
+		]),
+	})
+	const app = start(w)
+	const web = createInstance(
+		{ ...w.host, repo: async () => '/code/web' },
+		{ settings: DEFAULTS, remote: false, language: 'en' },
+	)
+	web.start()
+	await w.settle()
+	await app.activity(true)
+	await w.set(nine(85))
+	expect(w.label()).toBe('🍅 on a break')
+	await web.activity(true)
+	await w.set(nine(97))
+	expect(await app.command('today')).toBe(
+		'Today: 🍅 3 pomodoros (yesterday 0), 1 long break, 2 breaks skipped, longest 75m',
+	)
+	expect(await web.command('today')).toBe('Today: no pomodoros yet.')
 })
 
 test("the night before the first pomodoro is no long break, and its stretch not the day's longest", async () => {
@@ -677,9 +719,9 @@ test("yesterday's count is this repository's, and the tally keeps 14 days", asyn
 		},
 	})
 	const pomodoro = start(w)
-	await w.set(nine(25))
+	await w.set(nine(26))
 	expect(await pomodoro.command('today')).toBe(
-		'Today: 🍅 1 pomodoro (yesterday 2), 0 long breaks, 0 breaks skipped, longest 25m',
+		'Today: 🍅 1 pomodoro (yesterday 2), 0 long breaks, 0 breaks skipped, longest 26m',
 	)
 	expect((w.store.tally as TallyEntry[]).map((entry) => entry.at)).toEqual([
 		NINE - 2 * DAY,

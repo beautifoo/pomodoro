@@ -270,8 +270,12 @@ export function createInstance(
 		const now = await host.now()
 		let timer = ((await host.load('timer')) ?? {}) as Timer
 		// The tally credits the repository of the session with the latest activity: this one's, once its activity is newer
-		// than that stored, or none is. Only a ticking session writes it, so a `claude -p` run elsewhere takes no credit.
-		if (state.lastActivity > (timer.repoAt ?? -1))
+		// than that stored, or none is. Only a ticking session writes it, so a `claude -p` run elsewhere takes no credit. Not
+		// during a break: the stretch before it, and the break, count for the repository in use when the person left.
+		if (
+			timer.breakStart === undefined &&
+			state.lastActivity > (timer.repoAt ?? -1)
+		)
 			timer = {
 				...timer,
 				repo: await host.repo().catch(() => null),
@@ -599,8 +603,9 @@ function tick(
 	}
 	const worked = now - blockStart
 	const minutes = Math.floor(worked / MINUTE)
-	// A pomodoro goes into the tally once its 25 minutes are up, by the first session to tick then.
-	const up = Math.floor(worked / POMODORO)
+	// A pomodoro goes into the tally once the person's own input is 25 minutes in, by the first session to tick then: one
+	// up after they left is cut short by the break, as the set counts it.
+	const up = Math.floor(Math.max(0, lastInput - blockStart) / POMODORO)
 	entries.push(...pomodoros(blockStart, inTally, up, repo))
 	// Once a pomodoro is up, a break is due, except while quiet: then the count goes on, but nothing asks for one, the
 	// alert, the warning or the notes to the agent.
@@ -739,7 +744,7 @@ const logged = (log: CheckIn[], entry: CheckIn): CheckIn[] => [
 
 // The day's tally in `repo`, at local time, then its check-ins of the day. Long breaks count after a pomodoro of the day,
 // so the night before the first doesn't; a stretch counts on the day it ended, and the one under way (or just ended by
-// the break under way) while a tick has seen it lately.
+// the break under way) while a tick has seen it lately, in the repository it counts for.
 function today(
 	{
 		tally,
@@ -767,7 +772,9 @@ function today(
 	const breaks = mine.filter((entry) => entry.kind === 'break')
 	const todays = pomodoros.filter((p) => isToday(p.at))
 	const current =
-		timer.blockStart !== undefined && now - (timer.seenAt ?? 0) < SHORT_BREAK
+		timer.repo === repo &&
+		timer.blockStart !== undefined &&
+		now - (timer.seenAt ?? 0) < SHORT_BREAK
 			? (timer.breakStart ?? now) - timer.blockStart
 			: 0
 	const longest = Math.max(
