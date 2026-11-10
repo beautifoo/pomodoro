@@ -59,7 +59,7 @@ The agent's own turn, as opposed to a subagent's run.
 ### What the person and the agent get
 
 **Count**:
-The pomodoro under way in the set and the minutes into it: `🍅 3 of 4 · 12/25m`, and `5 of 4` after the fourth until a long break. The warning beside it once a break is due keeps the minutes since the last break: `🍅 52m, time for a break`.
+The pomodoro under way in the set and the minutes into it: `🍅 3 of 4 · 12/25m`, and on past 4 (`5 of 4`, `6 of 4`…) after the fourth until a long break. The warning beside it once a break is due keeps the minutes since the last break: `🍅 52m, time for a break`.
 
 **Alert**:
 The agent's own alert (in Claude Code a toast, and a banner where the terminal raises one; in Pi a warning line) and a chime when a pomodoro is up, asking for a short break, or a long one at the end of a set.
