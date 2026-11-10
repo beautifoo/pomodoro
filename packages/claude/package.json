@@ -2,6 +2,12 @@
 	"name": "@beautifoo/claude-pomodoro",
 	"version": "0.6.2",
 	"description": "Pomodoro plugin for Claude Code: a break when your 25 minutes are up, and a note that lets Claude sum up the session if that helps.",
+	"keywords": [
+		"claude-code",
+		"claude-code-plugin",
+		"pomodoro",
+		"break-reminder"
+	],
 	"license": "MIT",
 	"author": "Lorenzo Pieri",
 	"repository": {

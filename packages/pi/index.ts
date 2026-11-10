@@ -93,8 +93,12 @@ export default function (pi: ExtensionAPI) {
 				.catch(() => ({ code: 1, stdout: '' }))
 			return code === 0 ? dirname(stdout.trim()) : null
 		},
-		// One status entry: the count, or that a break is due.
-		show: (label, warning) => ui?.setStatus('pomodoro', warning ?? label),
+		// One status entry: the count, or that a break is due, in the theme's warning colour.
+		show: (label, warning) =>
+			ui?.setStatus(
+				'pomodoro',
+				warning === undefined ? label : ui.theme.fg('warning', warning),
+			),
 		// Pi has no desktop notification of its own: the alert is the in-app one, and core's chime.
 		notify: async (text, mark) => {
 			ui?.notify(`${mark}${text}`, 'warning')
