@@ -29,7 +29,7 @@ claude plugin marketplace update pomodoro
 claude plugin update pomodoro@pomodoro
 ```
 
-To keep the timer without the check-in, set `checkIn` to `false` under `/config`. To remove the plugin:
+To remove the plugin:
 
 ```
 claude plugin uninstall pomodoro@pomodoro
@@ -46,56 +46,55 @@ Tested with Pi 1.5. It runs in Pi's terminal UI only: not with `-p`, `--mode jso
 ## Features
 
 The same in both agents, as Claude Code shows them; how Pi differs follows the list.
-- **Check-in.** Once the pomodoro is up, Claude gets a note with its next tool result: you've gone 25 minutes without a break, it should carry on with the task, and if it would help you, include in its next reply a short summary of the session so far and whether it still serves the original goal, in a paragraph that starts with "Pomodoro:", then remind you to take a break. Nothing stops Claude or asks you anything: whether to sum up is Claude's call. A line in the transcript tells you the note was sent. It's sent once for every 25 minutes without a break, and only while Claude is working: it never waits in an idle session for your next prompt. It reaches the main conversation only, so during a long-running subagent it comes once the subagent returns.
-- **Log.** Claude's summary at each check-in, that "Pomodoro:" paragraph from any reply until its turn ends, is kept for 14 days, with the time and the repository, in Claude Code's plugin store on this machine (`~/.claude/plugins/store/`). `/pomodoro today` lists today's, by repository. A turn with no summary logs nothing.
-- **Count.** Shows the minutes since your last break, at the right of the prompt footer beside its other labels: `🍅 12/25m`. Once a break is due, a status line under the prompt says so too; Claude Code draws a plugin's status line in yellow with a ⚠, as `⚠ pomodoro: 🍅 27m, time for a break`. A phone following the session shows that line only.
-- **Alert.** After a 25-minute pomodoro it plays a chime and shows a toast and a desktop notification. The alert repeats every 5 minutes until you take a break, but not once you've been away from the keyboard for 2 minutes (the break may already be under way).
+- **Check-in.** Once the pomodoro is up, Claude gets a note with its next tool result: you've gone 25 minutes without a break, it should carry on with the task, and if it would help you, include in its next reply a short summary of the session so far and whether it still serves the original goal, in a paragraph that starts with "Pomodoro:", then remind you to take a break, a 15 to 30 minute one after the fourth pomodoro of a set. Nothing stops Claude or asks you anything: whether to sum up is Claude's call. A line in the transcript tells you the note was sent. It's sent once for every 25 minutes without a break, and only while Claude is working: it never waits in an idle session for your next prompt. It reaches the main conversation only, so during a long-running subagent it comes once the subagent returns. About 5 minutes before, Claude gets a heads-up you don't see, to bring its current step to a stopping point.
+- **Log.** Claude's summary at each check-in, that "Pomodoro:" paragraph from any reply until its turn ends, is kept for 14 days, with the time and the repository, in Claude Code's plugin store on this machine (`~/.claude/plugins/store/`), and so is a tally of your pomodoros and breaks. `/pomodoro today` counts today's in the repository you're in, as `Today: 🍅 4 pomodoros (yesterday 6), 1 long break, 2 breaks skipped, longest 75m`, then lists its summaries. A turn with no summary logs nothing.
+- **Count.** Shows the pomodoro under way in a set of four and the minutes into it, at the right of the prompt footer beside its other labels: `🍅 3 of 4 · 12/25m`. Once a break is due, a status line under the prompt says so too, with the minutes since your last break; Claude Code draws a plugin's status line in yellow with a ⚠, as `⚠ pomodoro: 🍅 27m, time for a break`. A phone following the session shows that line only.
+- **Alert.** After a 25-minute pomodoro it plays a chime and shows a toast and a desktop notification, asking for a 3 to 5 minute break, or a 15 to 30 minute one after the fourth pomodoro of a set. The alert repeats every 5 minutes until you take a break, but not once you've been away from the keyboard for 2 minutes (the break may already be under way), nor while the screen is locked.
 
-It runs on a clock, a tick every minute, so the alert comes on time even while you're reading code and not typing to Claude.
+It runs on a clock, a tick every minute, so the alert comes on time even while you're not typing to Claude. It speaks English, Italian, German, French, Spanish, Portuguese, Russian or Chinese, by Claude Code's `language` setting, else your Mac's language, and English for any other.
 
-In Pi, the count and the break warning share one entry at the foot of the screen, and the alert is a warning line in Pi with the chime and a desktop notification. The log is in `~/.pi/agent/pomodoro-log.json`.
+In Pi, the count and the break warning, in the theme's warning colour, share one entry at the foot of the screen, and the alert is a warning line in Pi with the chime. The log is in `~/.pi/agent/pomodoro-log.json`, the tally in `~/.pi/agent/pomodoro-tally.json`, and the language is the Mac's.
 
 ## Breaks
 
 You never start or stop the timer:
-- 5 minutes with no keyboard or mouse input (macOS idle time) counts as a break, and the next pomodoro starts when you're back.
-- Mouse movement counts only once it goes on for a second, so the nudge a keep-awake app's mouse jiggler gives every minute doesn't keep a break from ever starting. Keys, clicks and scrolls count at once.
-- Idle time is this Mac's own: 5 minutes spent on another computer counts as a break, unless you use this Mac's keyboard or trackpad in between (Universal Control included).
+- 3 minutes with no keyboard or mouse input (macOS idle time) counts as a break, and 15 minutes or more as a long one, which starts a new set. The next pomodoro starts when you're back, and it says so: `🍅 Back after 4m · pomodoro 2 of 4`.
+- Input counts only once it goes on: in 3 of the looks at the idle time, one every 10 seconds, within a minute. So a stray key, a click, or the nudge a keep-awake app's mouse jiggler gives every minute neither holds off a break nor ends one. A prompt you send counts at once.
+- Claude's own work, its replies and its tool calls, counts as you being there, so watching it isn't a break; but it doesn't end one, and a subagent's doesn't count. A break's length runs from your own last input.
+- Locking the screen starts the time away at once, and holds the alerts; 3 minutes locked is a break. Typing the password doesn't end it.
+- Idle time is this Mac's own: 3 minutes spent on another computer counts as a break, unless you use this Mac's keyboard or trackpad in between (Universal Control included).
 - A closed lid, or a stretch with no session of the agent open, also counts as a break.
+- `/pomodoro quiet`, for a meeting or a demo, keeps the count going with no alert, chime, warning or check-in, and sitting still is never a break. It ends when you run it again, or lock the screen or close the lid for 3 minutes.
 - The timer is one per person, shared by all your open sessions, so three sessions don't mean three notifications.
 - Claude Code and Pi keep a timer each: with both open, each counts and alerts on its own.
 
-On Linux, on Windows, or over SSH, there's no system idle time to read, so it falls back to the agent's activity: 5 minutes with no prompt or tool call in any session of that agent counts as a break.
+On Linux, on Windows, or over SSH, there's no system idle time to read, so it falls back to the agent's activity: 3 minutes with no prompt, reply or tool call of the main agent in any session of that agent counts as a break.
 
 ## Settings
 
 Under `/config`, or `pluginConfigs` in `settings.json`:
 
-| Setting        | Default | What it does                                                                                |
-| -------------- | ------- | ------------------------------------------------------------------------------------------- |
-| `workMinutes`  | `25`    | Minutes without a break before the alert                                                    |
-| `breakMinutes` | `5`     | Idle minutes that count as a break, and how often the alert repeats                         |
-| `moveSeconds`  | `1`     | Seconds the mouse has to keep moving to count (macOS); `0` counts every movement            |
-| `sound`        | `true`  | Whether each alert plays a chime (macOS)                                                    |
-| `checkIn`      | `true`  | Whether Claude gets a note at the alert, to sum up if that helps; off leaves only the alert |
-| `emoji`        | `true`  | Whether 🍅 marks the count and the alerts; off, the footer reads `pomodoro 12/25m`          |
+| Setting | Default | What it does                                                                                |
+| ------- | ------- | ------------------------------------------------------------------------------------------- |
+| `sound` | `true`  | Whether each alert plays a chime (macOS)                                                    |
+| `emoji` | `true`  | Whether 🍅 marks the count and the alerts; off, the footer reads `pomodoro 3 of 4 · 12/25m` |
 
-`workMinutes` and `breakMinutes` take 1 or more, `moveSeconds` 0 or more. `/config` refuses less. A value below that already in `settings.json` stops the plugin from loading, and nothing on screen says so: Claude Code names the setting only in its debug log (`claude --debug`).
+A value that isn't `true` or `false` in `settings.json` stops the plugin from loading, and nothing on screen says so: Claude Code names the setting only in its debug log (`claude --debug`).
 
-In Pi, the same keys go in `~/.pi/agent/pomodoro-settings.json`, read when a session starts or on `/reload`. A key the file leaves out, or leaves empty, keeps its default. A value of the wrong kind or below those minimums, or a file that isn't valid JSON or can't be read, keeps the timer off, with an error that says why:
+In Pi, the same keys go in `~/.pi/agent/pomodoro-settings.json`, read when a session starts or on `/reload`. A key the file leaves out, or leaves empty, keeps its default. A value that isn't `true` or `false`, or a file that isn't valid JSON or can't be read, keeps the timer off, with an error that says why:
 
 ```json
-{ "workMinutes": 50, "breakMinutes": 10 }
+{ "sound": false }
 ```
 
 ## Alerts
 
-- **Banner.** It goes through your Claude Code notification channel (`preferredNotifChannel`), so your terminal shows it. While the Claude tab is in front, Ghostty shows it for a few seconds only, then removes it, so it's easy to miss. Where the terminal can't raise one, it falls back to `osascript` on macOS: Apple Terminal has no notification channel. macOS credits that banner to Script Editor. If you turned Claude Code notifications off, there's no banner.
+- **Banner.** It goes through your Claude Code notification channel (`preferredNotifChannel`), so your terminal shows it. While the Claude tab is in front, Ghostty shows it for a few seconds only, then removes it, so it's easy to miss. Where the terminal can't raise one, as in Apple Terminal, which has no notification channel, or if you turned Claude Code notifications off, there's no banner.
 - **Chime.** Plain audio, not a notification, so you hear it even when the banner is easy to miss, and through a Focus (Work, Do Not Disturb).
 
 A Focus silences the banner unless it allows your terminal: System Settings → Focus → (your Focus) → Allowed Notifications → Apps.
 
-Pi has no notification channel of its own, so there the banner always comes through `osascript` (macOS), credited to Script Editor, and a Focus silences it unless it allows Script Editor.
+Pi has no notification channel of its own, so there's no banner in Pi.
 
 ## Development
 
@@ -109,7 +108,7 @@ bun run test
 claude --plugin-dir packages/claude
 ```
 
-`bun run build` copies `lib/core/index.ts` to `packages/claude/hooks/core.ts` and `packages/pi/core.ts` (both ignored by git), since a Claude Code plugin can only import its own files: run it again after editing core. `bun run test` runs core's tests, the plugin's, and a smoke test that runs Pi with the extension against a scripted model on localhost. The last command starts a session with the mod loaded from the folder; saving a file reloads it. Each load also writes the `claude-code` module's types for your Claude Code version into `packages/claude/.claude-plugin/types/` (ignored by git), which `packages/claude/tsconfig.json` points your editor and `tsc -p packages/claude` at, so run it once after cloning.
+`bun run build` copies `lib/core/index.ts` and `lib/core/messages.ts` to `core.ts` and `messages.ts` in `packages/claude/hooks/` and `packages/pi/` (all ignored by git), since a Claude Code plugin can only import its own files: run it again after editing core. `bun run test` runs core's tests, the plugin's, and a smoke test that runs Pi with the extension against a scripted model on localhost. The last command starts a session with the mod loaded from the folder; saving a file reloads it. Each load also writes the `claude-code` module's types for your Claude Code version into `packages/claude/.claude-plugin/types/` (ignored by git), which `packages/claude/tsconfig.json` points your editor and `tsc -p packages/claude` at, so run it once after cloning.
 
 For Pi, `pi -e ./packages/pi` starts a session with the extension loaded from the folder; remove the installed package first, or both run.
 
