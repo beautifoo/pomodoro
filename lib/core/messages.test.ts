@@ -10,8 +10,13 @@ test("languageFrom follows Claude Code's setting, then the Mac's first language,
 	expect(languageFrom('pt-BR', '')).toBe('pt')
 	expect(languageFrom('русский', '')).toBe('ru')
 	expect(languageFrom('中文', '')).toBe('zh')
+	expect(languageFrom('Brazilian Portuguese', mac)).toBe('pt') // the first word that names one
+	expect(languageFrom('Chinese (Simplified)', '')).toBe('zh')
 	expect(languageFrom('japanese', mac)).toBe('en') // set but not one of ours
 	expect(languageFrom(undefined, mac)).toBe('zh')
+	// `defaults` quotes only a code with more than letters in it.
+	expect(languageFrom(undefined, '(\n    it,\n    "en-US"\n)')).toBe('it')
+	expect(languageFrom(undefined, '(\n    de\n)')).toBe('de')
 	expect(languageFrom('', '(\n    "fr-CH"\n)')).toBe('fr') // empty is unset
 	expect(languageFrom(42, '')).toBe('en')
 	expect(languageFrom(undefined, 'garbage')).toBe('en')

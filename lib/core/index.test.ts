@@ -1417,7 +1417,7 @@ test('the check-in at the end of a set asks for the long break', async () => {
 	// 100 minutes straight: four pomodoros.
 	await w.set(T0 + 101 * MINUTE)
 	expect(pomodoro.toolResult(true).checkIn).toEndWith(
-		"Remind them to take a 15 to 30 minute break: that's 4 pomodoros.",
+		'Remind them to take a 15 to 30 minute break: their set of 4 pomodoros is done.',
 	)
 })
 

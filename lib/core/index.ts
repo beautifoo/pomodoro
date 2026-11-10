@@ -424,7 +424,7 @@ const check = (minutes: number, isSetUp: boolean) =>
 	'If it would help them, include in your next reply a short summary of the session so far, and whether it still ' +
 	'serves the original goal, in a paragraph that starts with "Pomodoro:". ' +
 	(isSetUp
-		? "Remind them to take a 15 to 30 minute break: that's 4 pomodoros."
+		? 'Remind them to take a 15 to 30 minute break: their set of 4 pomodoros is done.'
 		: 'Remind them to take a break.')
 
 // So the agent comes to a stopping point as the pomodoro ends.

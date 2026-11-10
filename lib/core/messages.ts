@@ -452,23 +452,27 @@ const NAMES: Record<Language, string[]> = {
 	zh: ['zh', 'chinese', '中文', '汉语', '简体中文', '繁體中文'],
 }
 
-// The language a name or a code (en-US, pt_BR) stands for; undefined: not one of ours.
+// The language a name or a code stands for, by its first word that's one of ours (en-US, pt_BR, Brazilian Portuguese,
+// Chinese (Simplified)); undefined: none is.
 function named(name: string): Language | undefined {
-	const text = name.trim().toLowerCase()
-	const found = (Object.keys(NAMES) as Language[]).find((language) =>
-		NAMES[language].some((n) => n === text || n === text.split(/[-_]/)[0]),
-	)
-	return found
+	const words = name.toLowerCase().split(/[^\p{L}]+/u)
+	for (const word of words) {
+		const found = (Object.keys(NAMES) as Language[]).find((language) =>
+			NAMES[language].includes(word),
+		)
+		if (found !== undefined) return found
+	}
 }
 
 // Claude Code's free-text `language` setting; else the Mac's first preferred language (`defaults` output, an old-style
-// plist); else English. A setting that's set but not one of ours is English, not the Mac's.
+// plist, which quotes a code only when it has more than letters: (it, "en-US")); else English. A setting that's set but
+// not one of ours is English, not the Mac's.
 export function languageFrom(
 	setting: unknown,
 	appleLanguages: string,
 ): Language {
 	if (typeof setting === 'string' && setting.trim() !== '')
 		return named(setting) ?? 'en'
-	const first = appleLanguages.match(/"([^"]+)"/)?.[1]
+	const first = appleLanguages.match(/\(\s*"?([^",\s)]+)/)?.[1]
 	return (first === undefined ? undefined : named(first)) ?? 'en'
 }
