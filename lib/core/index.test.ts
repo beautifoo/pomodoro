@@ -853,6 +853,43 @@ test('locking the screen for 3 minutes ends quiet, a gap too', async () => {
 	expect(gap.label()).toBe('🍅 1 of 4 · 0/25m')
 })
 
+// The last tick can come up to a minute before the lid closes: the time away runs from the session's own last look, so
+// 2 minutes 30 seconds is no break wherever it falls in the minute, typing around it or sitting still with quiet on.
+test('a lid closed for 2 minutes 30 seconds is no break, and quiet stays on', async () => {
+	for (const closedAt of [5_000, 30_000, 50_000].map((s) => 10 * MINUTE + s))
+		for (const [quiet, isTyping] of [
+			[false, true],
+			[true, true],
+			[true, false],
+		] as const) {
+			const openedAt = T0 + closedAt + 150_000
+			const w = world({
+				idle: inputs(
+					isTyping
+						? [
+								...steady(T0, T0 + closedAt),
+								...steady(openedAt, T0 + 20 * MINUTE),
+							]
+						: steady(T0, T0 + MINUTE),
+				),
+			})
+			const pomodoro = start(w)
+			if (quiet) {
+				await w.set(T0 + 2 * MINUTE)
+				await pomodoro.command('quiet')
+			}
+			await w.set(T0 + closedAt)
+			w.sleep(150_000)
+			await w.set(T0 + 20 * MINUTE)
+			// The ticks run 2 minutes 30 seconds later than before, the last at 19:30.
+			expect(w.label()).toBe(`🍅 ${quiet ? 'quiet · ' : ''}1 of 4 · 19/25m`)
+			expect(w.toasts).toEqual([])
+			// No break in the tally, and no pomodoro up yet.
+			expect(w.store.tally).toBeUndefined()
+			expect((w.store.timer as Timer).quiet).toBe(quiet)
+		}
+})
+
 // A keep-awake app's jiggler nudges the mouse each minute: seen by one look, it never counts.
 test("a jiggler's nudge every minute neither holds off a break nor ends one", async () => {
 	// In use to 29 minutes in, then only the nudge, 12 seconds into each minute, and in use again from 40.
@@ -936,6 +973,25 @@ test('3 minutes away is a break, 2 minutes 59 is not', async () => {
 	expect(w.label()).toBe('🍅 on a break')
 })
 
+// Input counts only once three looks have seen it, so the tick at 3 minutes can find a break the person came back from
+// just before: less than 3 minutes away, the stretch goes on.
+test('2 minutes 40 seconds away is no break, though the input after it counts only later', async () => {
+	// In use to 10 minutes in, away for 2 minutes 40 seconds, then in use again.
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 10 * MINUTE),
+			...steady(T0 + 12 * MINUTE + 40_000, T0 + 30 * MINUTE),
+		]),
+	})
+	start(w)
+	await w.set(T0 + 30 * MINUTE)
+	expect(w.label()).toBe('🍅 2 of 4 · 5/25m')
+	expect(w.toasts).toEqual([])
+	expect((w.store.tally as TallyEntry[]).map((entry) => entry.kind)).toEqual([
+		'pomodoro',
+	])
+})
+
 // Another session's input can end this one's break before its own looks see the return: what it read at the last
 // return is never taken for this one.
 test('a break forgets when the person came back from the last one', () => {
@@ -948,7 +1004,7 @@ test('a break forgets when the person came back from the last one', () => {
 	// Input that counts to 30 seconds in, then a break.
 	const look = (at: number) => ({ type: 'look', now: at, idleMs: 0 }) as const
 	const tick = (at: number) =>
-		({ type: 'tick', now: at, timer: {}, isLocked: false }) as const
+		({ type: 'tick', now: at, timer: {}, isLocked: false, awakeAt: 0 }) as const
 	feed(...[0, 10, 20, 30].map((s) => look(T0 + s * 1_000)))
 	feed(tick(T0 + 3.5 * MINUTE))
 	expect(state.backAt).toBeUndefined()
@@ -1408,6 +1464,7 @@ test('the return is never before the break began, and a break from 0 is a long o
 					breakStart,
 				},
 				isLocked: false,
+				awakeAt: now - MINUTE,
 			},
 			DEFAULTS,
 			'en',

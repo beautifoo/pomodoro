@@ -87,8 +87,15 @@ type Event =
 	| { type: 'activity'; now: number; byPerson: boolean }
 	// A look at the system's input idle time, which ioreg reads.
 	| { type: 'look'; now: number; idleMs: number }
-	// The minute's tick, with the stored timer and whether the screen is locked.
-	| { type: 'tick'; now: number; timer: Timer; isLocked: boolean }
+	// The minute's tick, with the stored timer, whether the screen is locked, and the instance's last tick or look before
+	// it (0: none), when the Mac was last awake as far as this session knows.
+	| {
+			type: 'tick'
+			now: number
+			timer: Timer
+			isLocked: boolean
+			awakeAt: number
+	  }
 	| { type: 'toolResult'; isMain: boolean }
 	// A finished response of the main loop, and the end of its turn (in Pi, the run).
 	| { type: 'reply'; text: string }
@@ -259,6 +266,8 @@ export function createInstance(
 	}
 
 	async function runTick() {
+		// Before this tick's own look: after a sleep, the last before it.
+		const awakeAt = Math.max(lastTickAt, state.lookedAt ?? 0)
 		lastTickAt = await host.now()
 		// A tick on its own (the clock never started) or with the looks behind takes one first; over SSH ioreg would see
 		// the console's input.
@@ -285,7 +294,13 @@ export function createInstance(
 				repo: await host.repo().catch(() => null),
 				repoAt: state.lastActivity,
 			}
-		for (const effect of feed({ type: 'tick', now, timer, isLocked })) {
+		for (const effect of feed({
+			type: 'tick',
+			now,
+			timer,
+			isLocked,
+			awakeAt,
+		})) {
 			// A tick still under way when the instance stopped carries out nothing more: its session is gone.
 			if (isStopped) return
 			// Each wake aims at the moment the stretch without input becomes a break, so the newest replaces the last.
@@ -501,7 +516,7 @@ function inputCounts(
 
 function tick(
 	previous: State,
-	{ now, timer, isLocked }: Extract<Event, { type: 'tick' }>,
+	{ now, timer, isLocked, awakeAt }: Extract<Event, { type: 'tick' }>,
 	settings: Settings,
 	language: Language,
 ): { state: State; effects: Effect[] } {
@@ -516,8 +531,13 @@ function tick(
 		now,
 	)
 	const { lockedSince } = state
-	// A gap is no tick for a break's length: the machine slept or no session was open. Like a break, it ends quiet.
-	const isGap = timer.seenAt === undefined || now - timer.seenAt >= SHORT_BREAK
+	// A gap is a break's length with no tick and no look of this session: the machine slept or no session was open. Like
+	// a break, it ends quiet. This session's last look comes at most 10 seconds before the lid closes, the last tick up to
+	// a minute, so a shorter sleep is no gap.
+	// ponytail: no session open counts from the last tick, up to a minute early; store when a session ends to fix it
+	const isGap =
+		timer.seenAt === undefined ||
+		now - Math.max(timer.seenAt, awakeAt) >= SHORT_BREAK
 	const isQuiet = timer.quiet === true && !isGap
 	// The person's last input that counts, from the looks at ioreg, and the main agent's last activity; without the
 	// looks, both are the activity. Each is the latest any session has seen, so an idle session can't end the pomodoro
@@ -540,7 +560,8 @@ function tick(
 
 	// The break began at the person's own last input, not the agent's. It forgets the last return: the look that counts
 	// the next one sets it again, and where another session's input ends this break first, there's none to read. The
-	// stretch before it, the set and the tally's are kept for the return; quiet isn't.
+	// stretch before it, the set, the tally's and the last alert are kept for the return, which may find it was none;
+	// quiet isn't.
 	const { repo = null, repoAt } = timer
 	let inTally = timer.counted ?? 0
 	if (idle >= SHORT_BREAK)
@@ -558,6 +579,7 @@ function tick(
 						blockStart: timer.blockStart,
 						done: timer.done,
 						seenAt: now,
+						alertedAt: timer.alertedAt,
 						lastInput,
 						agentAt,
 						breakStart: timer.breakStart ?? lastInput,
@@ -591,19 +613,23 @@ function tick(
 			state.backAt !== undefined && state.backAt >= leftAt
 				? state.backAt
 				: now - idle
-		// The pomodoros up before the break count, one cut short doesn't; a long break starts a new set. A break that began
-		// before any activity (at 0, off macOS) began long ago.
-		away = Math.max(0, backAt - leftAt)
-		const runMs = Math.max(0, leftAt - blockStart)
-		const upBefore = Math.floor(runMs / POMODORO)
-		done = away >= LONG_BREAK ? 0 : done + upBefore
-		// Into the tally: those no tick saw up (the lid closed right after one), and the break, unless it began before any
-		// activity, which has no length to tell. None of the new stretch's are in yet.
-		entries.push(...pomodoros(blockStart, inTally, upBefore, repo))
-		if (leftAt !== 0)
-			entries.push({ at: backAt, repo, kind: 'break', ms: away, runMs })
-		blockStart = backAt
-		inTally = 0
+		// Less than a break's length away is no break: input counts only once three looks saw it, so a tick can find a
+		// break the person came back from just before. Then the stretch goes on, as if none was found.
+		if (backAt - leftAt >= SHORT_BREAK) {
+			// The pomodoros up before the break count, one cut short doesn't; a long break starts a new set. A break that
+			// began before any activity (at 0, off macOS) began long ago.
+			away = backAt - leftAt
+			const runMs = Math.max(0, leftAt - blockStart)
+			const upBefore = Math.floor(runMs / POMODORO)
+			done = away >= LONG_BREAK ? 0 : done + upBefore
+			// Into the tally: those no tick saw up (the lid closed right after one), and the break, unless it began before
+			// any activity, which has no length to tell. None of the new stretch's are in yet.
+			entries.push(...pomodoros(blockStart, inTally, upBefore, repo))
+			if (leftAt !== 0)
+				entries.push({ at: backAt, repo, kind: 'break', ms: away, runMs })
+			blockStart = backAt
+			inTally = 0
+		}
 	}
 	const worked = now - blockStart
 	const minutes = Math.floor(worked / MINUTE)

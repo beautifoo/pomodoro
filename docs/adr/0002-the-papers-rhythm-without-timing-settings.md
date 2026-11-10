@@ -6,6 +6,6 @@ The plugin had a rhythm of its own: a pomodoro and a break of the lengths the pe
 
 - **Keep the timing settings**, with sets and a long break on top: more to set, and a length the person picks once doesn't fit the breaks they actually take; the paper's ranges take any of them.
 - **Learn the lengths from use**: the plugin would drift toward the 90-minute stretches it's there to break up.
-- **Detect meetings** by the microphone or camera in use, or the calendar: that's listening, which Lorenzo rejected. Quiet is told, and ends by itself with a lock or a closed lid.
+- **Detect meetings** by the microphone or camera in use, or the calendar: that's listening, which Lorenzo rejected. Quiet is told, and ends by itself with a lock or a closed lid of 3 minutes or more.
 - **The person's input alone as presence**: watching a long turn would end the pomodoro. **A subagent's work too**: its long runs would hold off every break. **A break from the agent's last activity**: someone who left before a long turn ended would be credited with a shorter break than they took, perhaps a short one for a long one.
 - **Keep osascript**, a watcher that read the mouse four times a second and a banner macOS credited to Script Editor: a long-running process per session for what a look at `ioreg` every 10 seconds tells, now that a stray nudge never counts anyway.
