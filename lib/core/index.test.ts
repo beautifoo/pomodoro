@@ -14,7 +14,7 @@ import {
 	type TallyEntry,
 	type Timer,
 } from './index'
-import { messages } from './messages'
+import { type Language, messages } from './messages'
 
 const T0 = 1_700_000_000_000
 const DAY = 24 * 60 * MINUTE
@@ -181,7 +181,7 @@ type World = ReturnType<typeof world>
 function start(
 	w: World,
 	settings: Partial<Settings> = {},
-	options: { remote?: boolean; kept?: unknown } = {},
+	options: { remote?: boolean; kept?: unknown; language?: Language } = {},
 ) {
 	const pomodoro = createInstance(w.host, {
 		settings: { ...DEFAULTS, ...settings },
@@ -1454,6 +1454,19 @@ test('coming back from a long break, the toast says a new set begins', async () 
 	expect(await toastsAfter(22)).toEqual([
 		'🍅 Back after 22m · new set, pomodoro 1 of 4',
 	])
+})
+
+// The word is the product's name, in every language.
+test('without the emoji, the footer says pomodoro in Russian and Chinese too', async () => {
+	for (const [language, label] of [
+		['ru', 'pomodoro 1 из 4 · 1/25 мин'],
+		['zh', 'pomodoro 1/4 · 1/25分钟'],
+	] as const) {
+		const w = world()
+		start(w, { emoji: false }, { language })
+		await w.advance(MINUTE)
+		expect(w.label()).toBe(label)
+	}
 })
 
 test('without the emoji, the toast has no tomato', async () => {

@@ -34,7 +34,6 @@ const said = (language: Language) => {
 		text.usage,
 		text.today(DAY),
 		text.noPomodoros,
-		text.name,
 		text.onABreak,
 		text.count(3, 12),
 		text.due(25),
@@ -65,10 +64,8 @@ test('every language says everything in its own words', () => {
 		const own = said(language)
 		expect(own.join('\n')).not.toContain('undefined')
 		expect(own.every((text) => text.trim() !== '')).toBe(true)
-		// The name may be the same word.
 		if (language !== 'en')
-			for (const [i, text] of own.entries())
-				if (i !== 4) expect(text).not.toBe(english[i])
+			for (const [i, text] of own.entries()) expect(text).not.toBe(english[i])
 	}
 })
 
@@ -89,6 +86,19 @@ test('English reads as it always has, and the time away is in hours from 2 hours
 		expect(messages[language].backLong(840)).not.toContain('840')
 		expect(messages[language].back(22, 2)).toContain('22')
 	}
+})
+
+// A count, a fraction, and a time away that reads as a time away, not a time of day.
+test('Chinese and French read naturally', () => {
+	const { zh, fr } = messages
+	expect(zh.count(3, 12)).toBe('3/4 · 12/25分钟')
+	expect(zh.back(4, 2)).toBe('回来了，离开了4分钟 · 番茄钟 2/4')
+	expect(zh.backLong(840)).toBe('回来了，离开了14小时 · 新一轮，番茄钟 1/4')
+	expect(fr.back(4, 2)).toBe('Absence de 4 min · pomodoro 2 sur 4')
+	expect(fr.backLong(840)).toBe(
+		'Absence de 14 h · nouvelle série, pomodoro 1 sur 4',
+	)
+	expect(fr.today(DAY)).toEndWith(', record sans pause 75 min')
 })
 
 // One, few and many: 1, 21; 2, 22; 5, 11, 25.

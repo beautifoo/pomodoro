@@ -568,7 +568,7 @@ function tick(
 				},
 				{
 					type: 'show',
-					label: `${tomato(settings, `${text.name} `)}${text.onABreak}`,
+					label: `${tomato(settings, 'pomodoro ')}${text.onABreak}`,
 				},
 			],
 		}
@@ -643,7 +643,7 @@ function tick(
 		},
 		{
 			type: 'show',
-			label: `${tomato(settings, `${text.name} `)}${isQuiet ? `${text.quiet} · ` : ''}${text.count(position, Math.floor((worked % POMODORO) / MINUTE))}`,
+			label: `${tomato(settings, 'pomodoro ')}${isQuiet ? `${text.quiet} · ` : ''}${text.count(position, Math.floor((worked % POMODORO) / MINUTE))}`,
 			warning: isDue
 				? `${tomato(settings)}${(isSetUp ? text.dueLong : text.due)(minutes)}`
 				: undefined,

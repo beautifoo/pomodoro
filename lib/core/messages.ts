@@ -18,8 +18,6 @@ export type Messages = {
 		longest: number
 	}) => string
 	noPomodoros: string
-	// The word in place of the 🍅 in the footer, when the emoji is off.
-	name: string
 	// The label while on a break; the count, of the pomodoro under way in the set of 4 and the minutes into it; the
 	// warning once a pomodoro is up, and the alert, each with the minutes since the last break, asking for the long break
 	// at the end of a set.
@@ -68,7 +66,6 @@ const en: Messages = {
 	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
 		`Today: ${mark}${plural('en', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (yesterday ${yesterday}), ${plural('en', longBreaks, { one: 'long break', other: 'long breaks' })}, ${plural('en', skipped, { one: 'break', other: 'breaks' })} skipped, longest ${longest}m`,
 	noPomodoros: 'Today: no pomodoros yet.',
-	name: 'pomodoro',
 	onABreak: 'on a break',
 	count: (position, minutes) => `${position} of 4 · ${minutes}/25m`,
 	due: (minutes) => `${minutes}m, time for a break`,
@@ -112,7 +109,6 @@ const it: Messages = {
 	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
 		`Oggi: ${mark}${plural('it', pomodoros, { one: 'pomodoro', other: 'pomodori' })} (ieri ${yesterday}), ${plural('it', longBreaks, { one: 'pausa lunga', other: 'pause lunghe' })}, ${plural('it', skipped, { one: 'pausa saltata', other: 'pause saltate' })}, massimo senza pausa ${longest} min`,
 	noPomodoros: 'Oggi: ancora nessun pomodoro.',
-	name: 'pomodoro',
 	onABreak: 'in pausa',
 	count: (position, minutes) => `${position} di 4 · ${minutes}/25 min`,
 	due: (minutes) => `${minutes} min, è ora di una pausa`,
@@ -157,7 +153,6 @@ const de: Messages = {
 	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
 		`Heute: ${mark}${plural('de', pomodoros, { one: 'Pomodoro', other: 'Pomodoros' })} (gestern ${yesterday}), ${plural('de', longBreaks, { one: 'lange Pause', other: 'lange Pausen' })}, ${plural('de', skipped, { one: 'Pause', other: 'Pausen' })} ausgelassen, am längsten ohne Pause ${longest} min`,
 	noPomodoros: 'Heute: noch keine Pomodoros.',
-	name: 'Pomodoro',
 	onABreak: 'in der Pause',
 	count: (position, minutes) => `${position} von 4 · ${minutes}/25 min`,
 	due: (minutes) => `${minutes} min, Zeit für eine Pause`,
@@ -184,7 +179,7 @@ const de: Messages = {
 		emoji: {
 			label: 'Tomaten-Emoji',
 			description:
-				"Zeigt 🍅 in der Zählung, der Statuszeile, den Einblendungen und dem Hinweis im Verlauf. Ist es aus, steht unten 'Pomodoro 3 von 4 · 12/25 min'.",
+				'Zeigt 🍅 in der Zählung, der Statuszeile, den Einblendungen und dem Hinweis im Verlauf. Ist es aus, steht unten „pomodoro 3 von 4 · 12/25 min“.',
 		},
 	},
 	off: (problems, path) =>
@@ -200,9 +195,8 @@ const fr: Messages = {
 		'Affiche les pomodoros et check-ins du jour dans ce dépôt, ou active et désactive le mode silencieux pour suspendre les alertes pendant une réunion.',
 	usage: 'Utilisation : /pomodoro [today|quiet]',
 	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
-		`Aujourd'hui : ${mark}${plural('fr', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (hier ${yesterday}), ${plural('fr', longBreaks, { one: 'longue pause', other: 'longues pauses' })}, ${plural('fr', skipped, { one: 'pause sautée', other: 'pauses sautées' })}, plus long sans pause ${longest} min`,
+		`Aujourd'hui : ${mark}${plural('fr', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (hier ${yesterday}), ${plural('fr', longBreaks, { one: 'longue pause', other: 'longues pauses' })}, ${plural('fr', skipped, { one: 'pause sautée', other: 'pauses sautées' })}, record sans pause ${longest} min`,
 	noPomodoros: "Aujourd'hui : pas encore de pomodoro.",
-	name: 'pomodoro',
 	onABreak: 'en pause',
 	count: (position, minutes) => `${position} sur 4 · ${minutes}/25 min`,
 	due: (minutes) => `${minutes} min, c'est l'heure de la pause`,
@@ -212,9 +206,9 @@ const fr: Messages = {
 	alertLong: (minutes) =>
 		`${plural('fr', minutes, { one: 'minute', other: 'minutes' })} sans pause. Votre série de 4 pomodoros est terminée : faites une pause de 15 à 30 minutes.`,
 	back: (minutes, position) =>
-		`De retour après ${away(minutes, ' min', ' h')} · pomodoro ${position} sur 4`,
+		`Absence de ${away(minutes, ' min', ' h')} · pomodoro ${position} sur 4`,
 	backLong: (minutes) =>
-		`De retour après ${away(minutes, ' min', ' h')} · nouvelle série, pomodoro 1 sur 4`,
+		`Absence de ${away(minutes, ' min', ' h')} · nouvelle série, pomodoro 1 sur 4`,
 	quiet: 'silencieux',
 	quietOn:
 		"Mode silencieux activé : aucune alerte ni check-in jusqu'à ce que vous relanciez /pomodoro quiet, ou que vous verrouilliez l'écran ou fermiez le portable pendant 3 minutes. Le comptage continue.",
@@ -247,7 +241,6 @@ const es: Messages = {
 	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
 		`Hoy: ${mark}${plural('es', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (ayer ${yesterday}), ${plural('es', longBreaks, { one: 'descanso largo', other: 'descansos largos' })}, ${plural('es', skipped, { one: 'descanso saltado', other: 'descansos saltados' })}, máximo sin descanso ${longest} min`,
 	noPomodoros: 'Hoy: aún no hay pomodoros.',
-	name: 'pomodoro',
 	onABreak: 'en descanso',
 	count: (position, minutes) => `${position} de 4 · ${minutes}/25 min`,
 	due: (minutes) => `${minutes} min, hora de descansar`,
@@ -294,7 +287,6 @@ const pt: Messages = {
 	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
 		`Hoje: ${mark}${plural('pt-PT', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (ontem ${yesterday}), ${plural('pt-PT', longBreaks, { one: 'pausa longa', other: 'pausas longas' })}, ${plural('pt-PT', skipped, { one: 'pausa pulada', other: 'pausas puladas' })}, máximo sem pausa ${longest} min`,
 	noPomodoros: 'Hoje: nenhum pomodoro ainda.',
-	name: 'pomodoro',
 	onABreak: 'em pausa',
 	count: (position, minutes) => `${position} de 4 · ${minutes}/25 min`,
 	due: (minutes) => `${minutes} min, hora de uma pausa`,
@@ -348,7 +340,6 @@ const ru: Messages = {
 	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
 		`Сегодня: ${mark}${plural('ru', pomodoros, { one: 'помидор', few: 'помидора', many: 'помидоров', other: 'помидора' })} (вчера ${yesterday}), ${plural('ru', longBreaks, { one: 'длинный перерыв', few: 'длинных перерыва', many: 'длинных перерывов', other: 'длинного перерыва' })}, ${plural('ru', skipped, { one: 'пропущенный перерыв', few: 'пропущенных перерыва', many: 'пропущенных перерывов', other: 'пропущенного перерыва' })}, максимум без перерыва ${longest} мин`,
 	noPomodoros: 'Сегодня: помидоров пока нет.',
-	name: 'помидор',
 	onABreak: 'на перерыве',
 	count: (position, minutes) => `${position} из 4 · ${minutes}/25 мин`,
 	due: (minutes) => `${minutes} мин, пора сделать перерыв`,
@@ -375,7 +366,7 @@ const ru: Messages = {
 		emoji: {
 			label: 'Эмодзи помидора',
 			description:
-				'Показывать 🍅 в счётчике, строке состояния, всплывающих сообщениях и заметке в переписке. Если выключено, счётчик внизу выглядит так: «помидор 3 из 4 · 12/25 мин».',
+				'Показывать 🍅 в счётчике, строке состояния, всплывающих сообщениях и заметке в переписке. Если выключено, счётчик внизу выглядит так: «pomodoro 3 из 4 · 12/25 мин».',
 		},
 	},
 	off: (problems, path) =>
@@ -393,9 +384,8 @@ const zh: Messages = {
 	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
 		`今天：${mark}${pomodoros}个番茄钟（昨天${yesterday}个），${longBreaks}次长休息，跳过${skipped}次休息，最长连续${longest}分钟`,
 	noPomodoros: '今天：还没有番茄钟。',
-	name: '番茄钟',
 	onABreak: '休息中',
-	count: (position, minutes) => `第${position}/4个 · ${minutes}/25分钟`,
+	count: (position, minutes) => `${position}/4 · ${minutes}/25分钟`,
 	due: (minutes) => `${minutes}分钟，该休息了`,
 	dueLong: (minutes) => `${minutes}分钟，该长休息了`,
 	alert: (minutes) =>
@@ -403,9 +393,9 @@ const zh: Messages = {
 	alertLong: (minutes) =>
 		`已经${minutes}分钟没休息了。这一轮4个番茄钟已完成，休息15到30分钟吧。`,
 	back: (minutes, position) =>
-		`回来了，离开了${away(minutes, '分钟', '小时')} · 第${position}/4个番茄钟`,
+		`回来了，离开了${away(minutes, '分钟', '小时')} · 番茄钟 ${position}/4`,
 	backLong: (minutes) =>
-		`回来了，离开了${away(minutes, '分钟', '小时')} · 新一轮，第1/4个番茄钟`,
+		`回来了，离开了${away(minutes, '分钟', '小时')} · 新一轮，番茄钟 1/4`,
 	quiet: '静音',
 	quietOn:
 		'静音已开启：不提醒，也不做小结，直到你再次运行 /pomodoro quiet，或锁屏、合上笔记本满3分钟。计时照常进行。',
@@ -420,7 +410,7 @@ const zh: Messages = {
 		emoji: {
 			label: '番茄表情',
 			description:
-				'在计数、状态栏、弹出提示和对话记录的提示中显示 🍅。关闭后，底部计数显示为“番茄钟 第3/4个 · 12/25分钟”。',
+				'在计数、状态栏、弹出提示和对话记录的提示中显示 🍅。关闭后，底部计数显示为“pomodoro 3/4 · 12/25分钟”。',
 		},
 	},
 	off: (problems, path) =>
