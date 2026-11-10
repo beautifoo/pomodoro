@@ -644,6 +644,26 @@ test("the night before the first pomodoro is no long break, and its stretch not 
 	)
 })
 
+test('no back toast after the night, one after a break the same day', async () => {
+	// The evening before, in use from 20:00 to 20:50, then the lid closed for the night. In use from 8:00 to 8:45:30,
+	// away for 20 minutes, and in use again.
+	const evening = nine(-13 * 60)
+	const w = worldAt(evening, {
+		idle: inputs([
+			...steady(evening, evening + 50 * MINUTE),
+			...steady(nine(-60), nine(-15) + 30_000),
+			...steady(nine(5) + 10_000, nine(31)),
+		]),
+	})
+	start(w)
+	await w.set(evening + 50 * MINUTE)
+	w.sleep(nine(-60) - w.now())
+	await w.set(nine(-50))
+	expect(w.toasts).toEqual([])
+	await w.set(nine(31))
+	expect(w.toasts).toEqual(['🍅 Back after 19m · new set, pomodoro 1 of 4'])
+})
+
 test('a pomodoro at 23:50 counts for that day', async () => {
 	// From 23:25, in use for 27 minutes, then the lid closed for the night, and in use from 8:00.
 	const late = nine(14 * 60 + 25)

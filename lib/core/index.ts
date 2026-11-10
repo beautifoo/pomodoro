@@ -676,8 +676,13 @@ function tick(
 		},
 	)
 	// Back, once: this tick stores the timer without the break, so another session's has none to end. In whole minutes, as
-	// the count's; not from a break that began before any activity, which has no length to tell.
-	if (away !== undefined && leftAt !== 0) {
+	// the count's; not from a break that began before any activity, which has no length to tell, nor from one that began
+	// on an earlier day (the night, as the tally takes it), where coming back is just starting the day.
+	if (
+		away !== undefined &&
+		leftAt !== 0 &&
+		new Date(leftAt ?? 0).toDateString() === new Date(now).toDateString()
+	) {
 		const minutesAway = Math.floor(away / MINUTE)
 		effects.push({
 			type: 'toast',
