@@ -3,6 +3,7 @@ import plugin from '../../packages/claude/.claude-plugin/plugin.json'
 import {
 	CHIME,
 	type CheckIn,
+	command,
 	createInstance,
 	DEFAULTS,
 	type Host,
@@ -43,6 +44,41 @@ test("plugin.json's titles and descriptions are the English ones", () => {
 			]),
 		),
 	).toEqual(messages.en.settings)
+})
+
+// Both agents list /pomodoro with this, so neither can fall back on English.
+test.each([
+	[
+		'en',
+		"Shows today's pomodoros and check-ins in this repository, or turns quiet on or off to hold the alerts during a meeting.",
+	],
+	[
+		'it',
+		'Mostra i pomodori e i check-in di oggi in questo repository, o attiva e disattiva il silenzio per sospendere gli avvisi durante una riunione.',
+	],
+	[
+		'de',
+		'Zeigt die heutigen Pomodoros und Check-ins in diesem Repository oder schaltet die Benachrichtigungen während eines Meetings stumm und wieder an.',
+	],
+	[
+		'fr',
+		'Affiche les pomodoros et check-ins du jour dans ce dépôt, ou active et désactive le mode silencieux pour suspendre les alertes pendant une réunion.',
+	],
+	[
+		'es',
+		'Muestra los pomodoros y check-ins de hoy en este repositorio, o activa y desactiva el modo silencio para pausar las alertas durante una reunión.',
+	],
+	[
+		'pt',
+		'Mostra os pomodoros e check-ins de hoje neste repositório, ou liga e desliga o modo silêncio para pausar os alertas durante uma reunião.',
+	],
+	[
+		'ru',
+		'Показывает сегодняшние помидоры и сводки в этом репозитории или включает и выключает тихий режим, чтобы уведомления не мешали во время встречи.',
+	],
+	['zh', '显示此仓库今天的番茄钟和小结，或开关静音，在会议期间暂停提醒。'],
+] as const)('/pomodoro is described in %p', (language, description) => {
+	expect(command(language)).toEqual({ name: 'pomodoro', description })
 })
 
 test('settingsFrom names every value of the wrong kind, takes an empty one as left out, and ignores the keys of older versions', () => {

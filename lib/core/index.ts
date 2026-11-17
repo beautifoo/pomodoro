@@ -144,11 +144,12 @@ export const LOCK = ['ioreg', '-n', 'Root', '-d', '1']
 // An alert's chime (macOS).
 export const CHIME = ['afplay', '/System/Library/Sounds/Glass.aiff']
 
-// /pomodoro, which an instance answers.
-export const COMMAND = {
-	name: 'pomodoro',
-	description: messages.en.description,
-}
+// /pomodoro, which an instance answers, and how the agent lists it in the person's language.
+export const COMMAND_NAME = 'pomodoro'
+export const command = (language: Language) => ({
+	name: COMMAND_NAME,
+	description: messages[language].description,
+})
 
 // What every session of the agent shares: the timer, the log of summaries, and the tally.
 export interface Stored {

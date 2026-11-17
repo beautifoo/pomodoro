@@ -6,7 +6,7 @@ import {
 	getAgentDir,
 } from '@earendil-works/pi-coding-agent'
 import {
-	COMMAND,
+	command,
 	createInstance,
 	DEFAULTS,
 	type Host,
@@ -50,7 +50,7 @@ async function readSettings(path: string, language: Language) {
 const KEPT = 'pomodoro'
 
 // Pi caches this factory per path, so everything lives in its closure, set again at each session start.
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
 	const dir = getAgentDir()
 	// One timer per person, shared by every open Pi session, the log of summaries after check-ins, and the tally: a file
 	// each.
@@ -65,11 +65,12 @@ export default function (pi: ExtensionAPI) {
 	// This session's instance of core (lib/core), or why there's none.
 	let instance: Instance | undefined
 	let off: string | undefined
-	// The Mac's first language, read at the session's start.
-	let language: Language = 'en'
 
 	const run: Host['run'] = async ([file, ...args], timeoutMs) =>
 		(await pi.exec(file, args, { timeout: timeoutMs })).stdout
+	// The Mac's first language, read once as Pi loads the extension, before it lists /pomodoro: Pi awaits this factory
+	// before any session starts.
+	const language = await languageOf(undefined, run)
 
 	// Pi's side of core, for a session in `cwd`; `ui` only in the terminal UI.
 	const host = (cwd: string, ui: ExtensionUIContext | undefined): Host => ({
@@ -115,7 +116,6 @@ export default function (pi: ExtensionAPI) {
 	pi.on('session_start', async (_, ctx) => {
 		instance = undefined
 		off = undefined
-		language = await languageOf(undefined, run)
 		const read = await readSettings(settingsPath, language)
 		// No timer, as in Claude Code with a setting that doesn't fit; Claude Code says why only in its debug log.
 		if ('problems' in read) {
@@ -198,8 +198,9 @@ export default function (pi: ExtensionAPI) {
 	})
 
 	// Pi runs it at once, mid-run too.
-	pi.registerCommand(COMMAND.name, {
-		description: COMMAND.description,
+	const { name, description } = command(language)
+	pi.registerCommand(name, {
+		description,
 		// Pi's counterpart of Claude Code's argument hint.
 		getArgumentCompletions: (prefix) => {
 			const items = ['today', 'quiet']

@@ -1,6 +1,7 @@
 import type { EngineInterface, Register } from 'claude-code'
 import {
-	COMMAND,
+	COMMAND_NAME,
+	command,
 	createInstance,
 	type Host,
 	type Instance,
@@ -90,8 +91,7 @@ export const register: Register = (on, options) => {
 		// depends on the turn.
 		await $.command
 			.register({
-				...COMMAND,
-				description: messages[language].description,
+				...command(language),
 				argumentHint: 'today | quiet',
 				immediate: true,
 			})
@@ -163,7 +163,7 @@ export const register: Register = (on, options) => {
 		return ended
 	})
 
-	on('command.run', { command: COMMAND.name }, async (_, e) => ({
+	on('command.run', { command: COMMAND_NAME }, async (_, e) => ({
 		text: (await instance?.command(e.args)) ?? '',
 	}))
 }
