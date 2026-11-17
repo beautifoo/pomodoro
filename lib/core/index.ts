@@ -165,16 +165,25 @@ export const COMMAND = {
 	description: messages.en.description,
 }
 
+// What every session of the agent shares: the timer, the log of summaries, and the tally.
+export interface Stored {
+	timer: Timer
+	checkIns: CheckIn[]
+	tally: TallyEntry[]
+}
+
 // What an agent gives an instance to do its I/O with. Each of these is general: what only one agent does stays in
 // that agent's code.
-export type Host = {
+export interface Host {
 	now: () => Promise<number>
 	// `fn` once after `ms`, or every `ms`; each returns what cancels it.
 	after: (ms: number, fn: () => void) => () => void
 	every: (ms: number, fn: () => void) => () => void
-	// What every session of the agent shares: the timer, the log of summaries, and the tally.
-	load: (key: 'timer' | 'checkIns' | 'tally') => Promise<unknown>
-	save: (key: 'timer' | 'checkIns' | 'tally', value: unknown) => Promise<void>
+	// What's stored under `key` (undefined: nothing yet).
+	// ponytail: read-then-write, so two sessions writing a key in the same instant can lose one write (an alert twice, a
+	// pomodoro or a summary missed, quiet undone); an atomic update in the store fixes it
+	load: <K extends keyof Stored>(key: K) => Promise<Stored[K] | undefined>
+	save: <K extends keyof Stored>(key: K, value: Stored[K]) => Promise<void>
 	// A command's output; a rejection or '' when it can't run, which core takes the same.
 	run: (argv: readonly string[], timeoutMs?: number) => Promise<string>
 	// The root of the session's repository (null: none).
@@ -282,7 +291,7 @@ export function createInstance(
 				'"IOConsoleLocked" = Yes',
 			)
 		const now = await host.now()
-		let timer = ((await host.load('timer')) ?? {}) as Timer
+		let timer: Timer = (await host.load('timer')) ?? {}
 		// The tally credits the repository of the session with the latest activity: this one's, once its activity is newer
 		// than that stored, or none is. Only a ticking session writes it, so a `claude -p` run elsewhere takes no credit. Not
 		// during a break: the stretch before it, and the break, count for the repository in use when the person left.
@@ -311,9 +320,8 @@ export function createInstance(
 					effect.afterMs,
 					() => void runTick().catch(() => {}),
 				)
-			}
-			// ponytail: read-then-write, so two sessions ticking in the same instant can both alert, or both add a pomodoro
-			else if (effect.type === 'persist') await host.save('timer', effect.timer)
+			} else if (effect.type === 'persist')
+				await host.save('timer', effect.timer)
 			else if (effect.type === 'show') host.show(effect.label, effect.warning)
 			else if (effect.type === 'alert')
 				await alert(effect.text, effect.sound, effect.mark)
@@ -324,9 +332,8 @@ export function createInstance(
 	}
 
 	// The tally with `entries` added, less the entries 14 days old.
-	// ponytail: read-then-write, so two sessions adding in the same instant can drop one
 	async function tally(now: number, entries: TallyEntry[]) {
-		const stored = ((await host.load('tally')) ?? []) as TallyEntry[]
+		const stored = (await host.load('tally')) ?? []
 		await host.save('tally', [
 			...stored.filter((entry) => now - entry.at < 14 * DAY),
 			...entries,
@@ -336,10 +343,9 @@ export function createInstance(
 	// Quiet on or off for every session of the agent, then a tick at once: the count says so, and off, a break due alerts
 	// now, even within 5 minutes of the last alert. After a sleep the tick comes first, so the gap doesn't end quiet just
 	// turned on.
-	// ponytail: read-then-write, so a tick storing the timer in the same instant can undo it
 	async function toggleQuiet() {
 		if (isTickBehind(await host.now())) await runTick().catch(() => {})
-		const timer = ((await host.load('timer')) ?? {}) as Timer
+		const timer: Timer = (await host.load('timer')) ?? {}
 		const quiet = !timer.quiet
 		await host.save(
 			'timer',
@@ -350,11 +356,10 @@ export function createInstance(
 		return quiet ? messages[language].quietOn : messages[language].quietOff
 	}
 
-	// ponytail: read-then-write, so two sessions logging in the same instant can drop one
 	async function log(text: string) {
 		const at = await host.now()
 		const repo = await host.repo()
-		const checkIns = ((await host.load('checkIns')) ?? []) as CheckIn[]
+		const checkIns = (await host.load('checkIns')) ?? []
 		await host.save('checkIns', logged(checkIns, { at, repo, text }))
 	}
 
@@ -405,9 +410,9 @@ export function createInstance(
 			if (!['', 'today'].includes(args.trim())) return messages[language].usage
 			return today(
 				{
-					tally: ((await host.load('tally')) ?? []) as TallyEntry[],
-					log: ((await host.load('checkIns')) ?? []) as CheckIn[],
-					timer: ((await host.load('timer')) ?? {}) as Timer,
+					tally: (await host.load('tally')) ?? [],
+					log: (await host.load('checkIns')) ?? [],
+					timer: (await host.load('timer')) ?? {},
 					now: await host.now(),
 					repo: await host.repo().catch(() => null),
 				},

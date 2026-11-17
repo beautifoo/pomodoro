@@ -12,6 +12,7 @@ import {
 	type Host,
 	type Instance,
 	type Settings,
+	type Stored,
 	settingsFrom,
 } from './core'
 import { type Language, languageFrom, messages } from './messages'
@@ -78,7 +79,8 @@ export default function (pi: ExtensionAPI) {
 			const interval = setInterval(fn, ms)
 			return () => clearInterval(interval)
 		},
-		load: (key) => load(paths[key]),
+		load: async (key) =>
+			(await load(paths[key])) as Stored[typeof key] | undefined,
 		save: (key, value) => save(paths[key], value),
 		run: async ([file, ...args], timeoutMs) =>
 			(await pi.exec(file, args, { timeout: timeoutMs })).stdout,

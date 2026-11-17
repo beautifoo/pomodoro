@@ -9,6 +9,7 @@ import {
 	LOCK,
 	MINUTE,
 	type Settings,
+	type Stored,
 	settingsFrom,
 	step,
 	type TallyEntry,
@@ -103,7 +104,7 @@ function world({
 		now: async () => now,
 		after: (ms, fn) => schedule({ at: now + ms, fn }),
 		every: (ms, fn) => schedule({ at: now + ms, every: ms, fn }),
-		load: async (key) => store[key],
+		load: async (key) => store[key] as Stored[typeof key] | undefined,
 		save: async (key, value) => {
 			store[key] = value
 		},

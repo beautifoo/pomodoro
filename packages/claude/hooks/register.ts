@@ -5,6 +5,7 @@ import {
 	type Host,
 	type Instance,
 	type Settings,
+	type Stored,
 	settingsFrom,
 } from './core'
 import {
@@ -36,7 +37,8 @@ function host($: EngineInterface): Host {
 			const timer = $.clock.every(ms, fn)
 			return () => timer.cancel()
 		},
-		load: (key) => $.store.get(key),
+		load: async (key) =>
+			(await $.store.get(key)) as Stored[typeof key] | undefined,
 		save: (key, value) => $.store.set(key, value),
 		run: async (argv, timeoutMs) =>
 			(await $.process.run(argv, { cwd: '/', timeoutMs })).stdout,
