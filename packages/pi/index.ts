@@ -161,7 +161,8 @@ export default async function (pi: ExtensionAPI) {
 	pi.on('tool_result', async (e, ctx) => {
 		const isMain = e.parentToolCallId === undefined
 		await instance?.activity(isMain)
-		const { checkIn, notice, headsUp } = instance?.toolResult(isMain) ?? {}
+		const { checkIn, notice, headsUp } =
+			(await instance?.toolResult(isMain)) ?? {}
 		// Pi shows a tool result's text, so the heads-up is a message the screen doesn't show. It goes with the run's next
 		// request to the model, and doesn't make one of its own.
 		if (headsUp !== undefined)

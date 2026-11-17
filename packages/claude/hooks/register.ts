@@ -132,7 +132,8 @@ export const register: Register = (on, options) => {
 		const ran = await next(e)
 		await instance?.activity(isMain)
 		if (ran.deny !== undefined) return ran
-		const { checkIn, notice, headsUp } = instance?.toolResult(isMain) ?? {}
+		const { checkIn, notice, headsUp } =
+			(await instance?.toolResult(isMain)) ?? {}
 		if (notice !== undefined)
 			void $.session
 				.append({

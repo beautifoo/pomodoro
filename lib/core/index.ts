@@ -199,12 +199,13 @@ export type Instance = {
 	// person submitted is their own input too.
 	activity: (isMain: boolean, byPerson?: boolean) => Promise<void>
 	// What goes with this tool result, if it's of the main loop: the check-in once a pomodoro is up, with the line that
-	// tells the person, and the heads-up shortly before it ends, for the agent alone. Each once per pomodoro.
-	toolResult: (isMain: boolean) => {
+	// tells the person, and the heads-up shortly before it ends, for the agent alone. Each once per pomodoro, and none
+	// due before the Mac slept.
+	toolResult: (isMain: boolean) => Promise<{
 		checkIn?: string
 		notice?: string
 		headsUp?: string
-	}
+	}>
 	// A finished response of the main loop, which may hold the summary.
 	reply: (text: string) => Promise<void>
 	// The end of the main loop's turn (in Pi, the run).
@@ -360,8 +361,10 @@ export function createInstance(
 			// A subagent's work isn't the person being there.
 			if (isMain) feed({ type: 'activity', now, byPerson })
 		},
-		toolResult(isMain) {
-			const notes: ReturnType<Instance['toolResult']> = {}
+		async toolResult(isMain) {
+			// After a sleep the tick comes first, so a check-in due before it isn't sent.
+			if (isTickBehind(await host.now())) await runTick().catch(() => {})
+			const notes: Awaited<ReturnType<Instance['toolResult']>> = {}
 			for (const effect of feed({ type: 'toolResult', isMain }))
 				if (effect.type === 'checkIn') {
 					host.keep(effect.key)
