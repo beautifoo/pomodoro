@@ -98,3 +98,9 @@ export const credited = (
 	timer.breakStart == null && activity > (timer.repoAt ?? -1)
 		? { ...timer, repo, repoAt: activity }
 		: timer
+
+// /pomodoro quiet, on or off. Off, it forgets the last alert, so a break due alerts at once, even within 5 minutes of it.
+export const quietToggled = (timer: Timer): Timer =>
+	timer.quiet
+		? { ...timer, quiet: false, alertedAt: undefined }
+		: { ...timer, quiet: true }

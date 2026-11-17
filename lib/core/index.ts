@@ -1,5 +1,5 @@
 import { type Language, messages } from './messages'
-import { credited, onBreak, type Timer, working } from './timer'
+import { credited, onBreak, quietToggled, type Timer, working } from './timer'
 
 export type { Timer } from './timer'
 
@@ -318,15 +318,13 @@ export function createInstance(
 	// turned on.
 	async function toggleQuiet() {
 		if (isTickBehind(await host.now())) await runTick().catch(() => {})
-		const timer: Timer = (await host.load('timer')) ?? {}
-		const quiet = !timer.quiet
-		await host.save(
-			'timer',
-			quiet ? { ...timer, quiet } : { ...timer, quiet, alertedAt: undefined },
-		)
+		const timer = quietToggled((await host.load('timer')) ?? {})
+		await host.save('timer', timer)
 		// Only where the clock runs, which is where the count shows.
 		if (cancelClock !== undefined && !isStopped) await runTick().catch(() => {})
-		return quiet ? messages[language].quietOn : messages[language].quietOff
+		return timer.quiet
+			? messages[language].quietOn
+			: messages[language].quietOff
 	}
 
 	async function log(text: string) {

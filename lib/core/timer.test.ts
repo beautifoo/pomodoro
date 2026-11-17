@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import fc from 'fast-check'
-import { credited, onBreak, type Timer, working } from './timer'
+import { credited, onBreak, quietToggled, type Timer, working } from './timer'
 
 const T0 = 1_700_000_000_000
 const MINUTE = 60_000
@@ -237,6 +237,68 @@ test('crediting twice is the same as once', () => {
 		fc.property(stored, fc.nat(), fields.repo, (timer, activity, repo) => {
 			const once = credited(timer, activity, repo)
 			expect(credited(once, activity, repo)).toEqual(once)
+		}),
+	)
+})
+
+test('turning quiet off forgets the last alert', () => {
+	expect(quietToggled({ quiet: true, alertedAt: T0 })).toEqual({
+		quiet: false,
+		alertedAt: undefined,
+	})
+})
+
+test('turning quiet on keeps the last alert', () => {
+	expect(quietToggled({ alertedAt: T0 })).toEqual({
+		quiet: true,
+		alertedAt: T0,
+	})
+})
+
+// A timer stored while quiet, and one stored while not, with any other fields.
+const quiet = stored.map((timer) => ({ ...timer, quiet: true }))
+const notQuiet = stored.filter((timer) => timer.quiet !== true)
+
+test('toggling quiet twice gives back the same quiet', () => {
+	fc.assert(
+		fc.property(stored, (timer) => {
+			expect(quietToggled(quietToggled(timer)).quiet).toBe(timer.quiet === true)
+		}),
+	)
+})
+
+test('whatever the timer, turning quiet off forgets the last alert', () => {
+	fc.assert(
+		fc.property(quiet, (timer) => {
+			expect(quietToggled(timer).alertedAt).toBeUndefined()
+		}),
+	)
+})
+
+test('whatever the timer, turning quiet on keeps the last alert', () => {
+	fc.assert(
+		fc.property(notQuiet, (timer) => {
+			expect(quietToggled(timer).alertedAt).toBe(timer.alertedAt)
+		}),
+	)
+})
+
+test('whatever the timer, turning quiet on sets it', () => {
+	fc.assert(
+		fc.property(notQuiet, (timer) => {
+			expect(quietToggled(timer).quiet).toBe(true)
+		}),
+	)
+})
+
+test('toggling quiet keeps everything but quiet and the last alert', () => {
+	fc.assert(
+		fc.property(stored, (timer) => {
+			expect({
+				...quietToggled(timer),
+				quiet: undefined,
+				alertedAt: undefined,
+			}).toEqual({ ...timer, quiet: undefined, alertedAt: undefined })
 		}),
 	)
 })
