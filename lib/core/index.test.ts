@@ -1668,6 +1668,31 @@ test('without the emoji, the toast has no tomato', async () => {
 	])
 })
 
+test('without the emoji, the warning has no tomato', async () => {
+	const w = world()
+	start(w, { emoji: false })
+	await w.advance(25 * MINUTE)
+	expect(w.shows.at(-1)?.warning).toBe('25m, time for a break')
+})
+
+test('without the emoji, the alert has no tomato', async () => {
+	const w = world()
+	start(w, { emoji: false })
+	await w.advance(25 * MINUTE)
+	expect(w.notified).toEqual([
+		'25 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
+	])
+})
+
+test('without the emoji, the line that tells the person about the check-in has no tomato', async () => {
+	const w = world()
+	const pomodoro = start(w, { emoji: false })
+	await w.advance(26 * MINUTE)
+	expect((await pomodoro.toolResult(true)).notice).toBe(
+		'Pomodoro: told the agent your pomodoro is up.',
+	)
+})
+
 // The tick that ends the break stores the timer without it, so the other session's tick has none to end.
 test('two sessions, one toast', async () => {
 	expect(await toastsAfter(4, { sessions: 2 })).toEqual([
