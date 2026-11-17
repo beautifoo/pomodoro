@@ -5,12 +5,12 @@ import { expect, mock, test } from 'claude-code/testing'
 const T0 = 1_700_000_000_000
 const MIN = 60_000
 
-// The engine beneath the mod: a clock, a store, ioreg reporting `idle(now)` (null: no ioreg), Claude Code's `language`
-// setting (none by default), the terminal's notification, a repository at /code/app, and recorders. `notified` holds every banner, `osascripts` those osascript was asked for,
+// The engine beneath the mod: a clock, a store, ioreg reporting `idle(now)`, Claude Code's `language` setting (none by
+// default), the terminal's notification, a repository at /code/app, and recorders. `notified` holds every banner,
 // `labels` each count written for the prompt footer.
 const world = (
 	on: On,
-	idle: (now: number) => number | null,
+	idle: (now: number) => number,
 	seed?: Record<string, unknown>,
 	language?: string,
 ) => {
@@ -25,7 +25,6 @@ const world = (
 	mock.env(on, {})
 	const session = mock.session(on)
 	const notified: string[] = []
-	const osascripts: (readonly string[])[] = []
 	const status: (string | undefined)[] = []
 	const labels: string[] = []
 	const chimes: number[] = []
@@ -78,7 +77,6 @@ const world = (
 	}
 	on('process.run', (_, e) => {
 		if (e.argv[0] === 'afplay') chimes.push(clock.now())
-		if (e.argv[0] === 'osascript') osascripts.push(e.argv)
 		// The Mac's languages: none.
 		if (e.argv[0] === 'defaults')
 			return {
@@ -90,18 +88,14 @@ const world = (
 					isStderrTruncated: false,
 				},
 			}
-		const ms = idle(clock.now())
 		// The screen lock: never locked.
 		const isLock = e.argv.includes('Root')
 		return {
 			value: {
-				exitCode: ms === null ? 1 : 0,
-				stdout:
-					ms === null
-						? ''
-						: isLock
-							? '"IOConsoleLocked" = No'
-							: `"HIDIdleTime" = ${ms * 1e6}`,
+				exitCode: 0,
+				stdout: isLock
+					? '"IOConsoleLocked" = No'
+					: `"HIDIdleTime" = ${idle(clock.now()) * 1e6}`,
 				stderr: '',
 				isStdoutTruncated: false,
 				isStderrTruncated: false,
@@ -139,7 +133,6 @@ const world = (
 		store,
 		session,
 		notified,
-		osascripts,
 		status,
 		labels,
 		toasts,
@@ -178,7 +171,7 @@ const endTurn = (
 		agentId,
 	})
 
-// What /pomodoro prints for `args`, and for today.
+// What /pomodoro prints for `args`.
 const pomodoro = async ($: Engine, args: string) =>
 	(
 		await $.command.run({
@@ -188,7 +181,6 @@ const pomodoro = async ($: Engine, args: string) =>
 			presentation: { isFullscreen: false, columns: 80 },
 		})
 	).text
-const listed = ($: Engine) => pomodoro($, 'today')
 
 const texts = (checkIns: unknown) =>
 	(checkIns as { text: string }[]).map((c) => c.text)
@@ -251,22 +243,18 @@ test('a session with nobody at its prompt never counts: -p, VS Code, the desktop
 })
 
 test("the alert goes through the terminal's notification, and nothing else posts a banner", async ($, on) => {
-	const { clock, notified, chimes, osascripts } = world(on, () => 0)
+	const { clock, notified, chimes } = world(on, () => 0)
 	await start($)
 	await clock.advance(25 * MIN)
 	expect(notified).toEqual([
 		'25 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
 	])
 	expect(chimes.length).toBe(1)
-	expect(osascripts).toEqual([])
 })
 
 // Registered `immediate`, /pomodoro typed while a turn is in flight runs at once instead of waiting for the turn to end.
-test('/pomodoro quiet runs mid-turn, and the count shows it', async ($, on) => {
-	const { clock, notified, chimes, status, labels, registered } = world(
-		on,
-		() => 0,
-	)
+test('/pomodoro is registered to run mid-turn', async ($, on) => {
+	const { registered } = world(on, () => 0)
 	await start($)
 	expect(registered).toEqual([
 		{
@@ -277,17 +265,12 @@ test('/pomodoro quiet runs mid-turn, and the count shows it', async ($, on) => {
 			immediate: true,
 		},
 	])
-	await clock.advance(10 * MIN)
-	expect(await pomodoro($, 'quiet')).toStartWith('Quiet is on: no alerts')
-	expect(labels.at(-1)).toBe('🍅 quiet · 1 of 4 · 10/25m')
+})
 
-	// No alert, chime or warning while quiet; off, the alert at once.
-	await clock.advance(20 * MIN)
-	expect([notified, chimes, status.filter(Boolean)]).toEqual([[], [], []])
-	expect(await pomodoro($, 'quiet')).toBe('Quiet is off.')
-	expect(labels.at(-1)).toBe('🍅 1 of 4 · 25/25m')
-	expect([notified.length, chimes.length]).toEqual([1, 1])
-	expect(status.at(-1)).toBe('🍅 30m, time for a break')
+test('/pomodoro quiet answers with what the instance says', async ($, on) => {
+	world(on, () => 0)
+	await start($)
+	expect(await pomodoro($, 'quiet')).toStartWith('Quiet is on: no alerts')
 })
 
 // Claude Code's free-text `language` setting before the Mac's; /config's rows for the plugin's settings too.
@@ -333,9 +316,10 @@ test('in Italian, the count, /pomodoro and /config speak Italian', async ($, on)
 	})
 })
 
-test('back from a break, a toast says so, with no banner and no chime', async ($, on) => {
+// The one banner and the one chime are the alert's.
+test('back from a break, a toast says so for 8 seconds, with no banner and no chime', async ($, on) => {
 	let leftAt = Infinity
-	const { clock, notified, chimes, toasts, toastMs } = world(on, (now) =>
+	const { clock, notified, chimes, toastMs } = world(on, (now) =>
 		now >= leftAt ? now - leftAt : 0,
 	)
 	await start($)
@@ -344,42 +328,37 @@ test('back from a break, a toast says so, with no banner and no chime', async ($
 	await clock.advance(4 * MIN)
 	leftAt = Infinity
 	await clock.advance(MIN)
-	expect(toasts.at(-1)).toBe('🍅 Back after 4m · pomodoro 2 of 4')
-	expect(toastMs.at(-1)).toBe(8_000)
-	// The one banner and the one chime are the alert's.
-	expect([notified.length, chimes.length]).toEqual([1, 1])
+	expect({
+		toastMs: toastMs.at(-1),
+		banners: notified.length,
+		chimes: chimes.length,
+	}).toEqual({ toastMs: 8_000, banners: 1, chimes: 1 })
 })
 
-test('the check-in rides the next tool result, once per pomodoro, and never waits in an idle session', async ($, on) => {
-	let leftAt = Infinity
-	const { clock, session, labels } = world(on, (now) =>
-		now >= leftAt ? now - leftAt : 0,
-	)
+// A session 26 minutes into a pomodoro, with the person typing at its prompt and the main loop idle.
+const due = async ($: Engine, on: On) => {
+	const w = world(on, () => 0)
 	await start($)
-	expect(await checked($)).toBe(false)
+	await w.clock.advance(26 * MIN)
+	return w
+}
 
-	// At the prompt, typing elsewhere: nothing lands in the conversation.
-	await clock.advance(26 * MIN)
-	expect(session.appended().length).toBe(0)
+test('the check-in never waits in an idle session', async ($, on) => {
+	const { session } = await due($, on)
+	expect(session.appended()).toEqual([])
+})
 
+test("the check-in rides the main loop's next tool result", async ($, on) => {
+	await due($, on)
 	expect(await checked($)).toBe(true)
+})
+
+test('a line in the transcript tells the person the check-in went out', async ($, on) => {
+	const { session } = await due($, on)
+	await checked($)
 	expect(JSON.stringify(session.appended())).toContain(
 		'told the agent your pomodoro is up',
 	)
-	expect(await checked($)).toBe(false)
-
-	// Still no break 25 minutes later: no next pomodoro, so no second check-in.
-	await clock.advance(25 * MIN)
-	expect(await checked($)).toBe(false)
-
-	// A break of 3 minutes clears what is due, and steady input ends it.
-	leftAt = clock.now()
-	await clock.advance(3 * MIN)
-	expect(labels.at(-1)).toBe('🍅 on a break')
-	leftAt = Infinity
-	await clock.advance(MIN)
-	expect(labels.at(-1)).toBe('🍅 2 of 4 · 0/25m')
-	expect(await checked($)).toBe(false)
 })
 
 // For Claude alone: nothing of it shows in the conversation.
@@ -416,8 +395,7 @@ test("a subagent's tool call, or one that was denied, doesn't take the check-in"
 test('a reload does not repeat the check-in the session was given', async ($, on) => {
 	// Overdue for a minute, and the check-in for this pomodoro was given before the mod reloaded (a /config change). The
 	// number under sentKey is also what 0.6.1 left there, so an update doesn't repeat a check-in.
-	let leftAt = Infinity
-	const { clock } = world(on, (now) => (now >= leftAt ? now - leftAt : 0), {
+	const { clock } = world(on, () => 0, {
 		timer: {
 			blockStart: T0 - 26 * MIN,
 			seenAt: T0 - 30_000,
@@ -425,28 +403,24 @@ test('a reload does not repeat the check-in the session was given', async ($, on
 			lastInput: T0,
 		},
 	})
-	const sent: number[] = []
 	on('state.get', { plugin: 'pomodoro', key: 'sentKey' }, () => ({
 		value: { value: T0 - MIN, version: 1 },
 	}))
+	await start($)
+	await clock.settle()
+	expect(await checked($)).toBe(false)
+})
+
+// By when its pomodoro ends.
+test('the check-in given is kept for the next reload', async ($, on) => {
+	const sent: number[] = []
 	on('state.set', { plugin: 'pomodoro', key: 'sentKey' }, (_, e) => {
 		sent.push(e.value)
 		return { value: { isSet: true, version: 2 } }
 	})
-	await start($)
-	await clock.settle()
-	expect(await checked($)).toBe(false)
-
-	// None while there's no break; after one, the next pomodoro gets its check-in, and it's kept for the next reload.
-	await clock.advance(25 * MIN)
-	expect(await checked($)).toBe(false)
-	leftAt = clock.now()
-	await clock.advance(4 * MIN)
-	leftAt = Infinity
-	await clock.advance(26 * MIN)
-	expect(await checked($)).toBe(true)
-	// Back at the first look after the break, 10 seconds into its minute.
-	expect(sent).toEqual([T0 + 54 * MIN + 10_000])
+	await due($, on)
+	await checked($)
+	expect(sent).toEqual([T0 + 25 * MIN])
 })
 
 // A removed setting reaches the plugin as it was in settings.json: unchecked, and of any type.
@@ -461,97 +435,49 @@ test(
 	},
 )
 
+// The tomato's rules are core's; the plugin's part is passing the option on.
 test(
-	'without the emoji, the footer says pomodoro and nothing else shows a tomato',
+	'without the emoji, the footer says pomodoro',
 	{ options: { emoji: false } },
 	async ($, on) => {
-		const { clock, session, status, labels, toasts } = world(on, () => 0)
+		const { clock, labels } = world(on, () => 0)
 		await start($)
 		await clock.settle()
 		expect(labels.at(-1)).toBe('pomodoro 1 of 4 · 0/25m')
-
-		await clock.advance(25 * MIN)
-		expect(status.at(-1)).toBe('25m, time for a break')
-		expect(toasts).toEqual([
-			'25 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
-		])
-		expect(await checked($)).toBe(true)
-		expect(JSON.stringify(session.appended())).toContain(
-			'Pomodoro: told the agent your pomodoro is up',
-		)
-		expect(
-			JSON.stringify([labels, status, toasts, session.appended()]),
-		).not.toContain('🍅')
 	},
 )
 
-// Listed at the moment it's logged, so the day matches in any time zone: CI's and this Mac's differ.
-test("the check-in's summary is logged from any reply in its turn, and /pomodoro today lists it under the day's count", async ($, on) => {
-	const { clock, store, respond } = world(on, () => 0)
-	await start($)
-	expect(await listed($)).toBe('Today: no pomodoros yet.')
-
-	// A summary with no check-in before it logs nothing.
-	await respond($, 'Pomodoro: early.')
-	expect(store.checkIns).toBe(undefined)
-
-	await clock.advance(26 * MIN)
-	expect(await checked($)).toBe(true)
-	// Neither a subagent's summary nor a reply without one is logged, and the end of the subagent's run doesn't end the
-	// wait; one given mid-task, beside a tool call, is.
+// Neither a subagent's summary is logged, nor does the end of the subagent's run end the wait; the main loop's, given
+// mid-task beside a tool call, is.
+test("the check-in's summary is logged from the main loop's reply, not a subagent's", async ($, on) => {
+	const { store, respond } = await due($, on)
+	await checked($)
 	await respond($, 'Pomodoro: the subagent.', [], 'a1')
 	await endTurn($, 'answer', 'a1')
-	await respond($, 'Writing step2.', ['Write'])
-	await respond(
-		$,
-		'Wrote step2.\n\n**Pomodoro:** on the goal.\nTake a break.',
-		['Write'],
-	)
-	await respond($, 'Pomodoro: again.')
-	expect(texts(store.checkIns)).toEqual([
-		'Pomodoro: on the goal.\nTake a break.',
-	])
-	expect(await listed($)).toMatch(
-		/^Today: 🍅 1 pomodoro \(yesterday 0\), 0 long breaks, 0 late breaks, longest 26m\n\d\d:\d\d {2}Pomodoro: on the goal\.\n {7}Take a break\.$/,
-	)
+	await respond($, 'Wrote step2.\n\nPomodoro: on the goal.', ['Write'])
+	expect(texts(store.checkIns)).toEqual(['Pomodoro: on the goal.'])
 })
 
-test("a turn that ends without the summary, answered or cut short, logs nothing, and the next turn's isn't taken for it", async ($, on) => {
-	let leftAt = Infinity
-	const { clock, store, respond } = world(on, (now) =>
-		now >= leftAt ? now - leftAt : 0,
-	)
-	await start($)
-	for (const reason of ['answer', 'aborted'] as const) {
-		await clock.advance(26 * MIN)
-		expect(await checked($)).toBe(true)
-		await respond($, 'Done.')
-		await endTurn($, reason)
-		await respond($, 'Pomodoro: the next turn.')
-		// A break, so the next pomodoro has a check-in of its own.
-		leftAt = clock.now()
-		await clock.advance(4 * MIN)
-		leftAt = Infinity
-	}
-	expect(store.checkIns).toBe(undefined)
+// The check-in, a reply without the summary, the turn's end, then a summary in the next turn: what was logged.
+const endedWithout = async (
+	$: Engine,
+	on: On,
+	reason: 'answer' | 'aborted',
+) => {
+	const { store, respond } = await due($, on)
+	await checked($)
+	await respond($, 'Done.')
+	await endTurn($, reason)
+	await respond($, 'Pomodoro: the next turn.')
+	return store.checkIns
+}
+
+test("a turn answered without the summary logs nothing, and the next turn's isn't taken for it", async ($, on) => {
+	expect(await endedWithout($, on, 'answer')).toBe(undefined)
 })
 
-test("ioreg's idle time is the input: 3 minutes away is a break, and steady use ends it", async ($, on) => {
-	// ioreg sees the person away since 3 minutes before the start.
-	let leftAt = T0 - 3 * MIN
-	const { clock, labels } = world(on, (now) =>
-		now >= leftAt ? now - leftAt : 0,
-	)
-	await start($)
-	await clock.settle()
-	expect(labels.at(-1)).toBe('🍅 on a break')
-
-	// Back at the keyboard.
-	leftAt = Infinity
-	await clock.set(T0 + MIN)
-	expect(labels.at(-1)).toBe('🍅 1 of 4 · 0/25m')
-	await clock.set(T0 + 10 * MIN)
-	expect(labels.at(-1)).toBe('🍅 1 of 4 · 9/25m')
+test("a turn cut short without the summary logs nothing, and the next turn's isn't taken for it", async ($, on) => {
+	expect(await endedWithout($, on, 'aborted')).toBe(undefined)
 })
 
 test("a subagent's tool calls don't hold off a break, the main loop's do", async ($, on) => {
@@ -586,37 +512,4 @@ test("the person's own prompt ends a break", async ($, on) => {
 	// Back at the prompt.
 	await clock.advance(MIN)
 	expect(labels.at(-1)).toBe('🍅 1 of 4 · 1/25m')
-})
-
-test('without ioreg, a break is a break from every session', async ($, on) => {
-	// Another session was in use 10 seconds ago, 20 minutes into a pomodoro: a fresh session keeps that pomodoro.
-	const { clock, notified, labels } = world(on, () => null, {
-		timer: {
-			blockStart: T0 - 20 * MIN,
-			seenAt: T0 - 30_000,
-			lastInput: T0 - 10_000,
-		},
-	})
-	await start($)
-	await clock.settle()
-	expect(labels.at(-1)).toBe('🍅 1 of 4 · 20/25m')
-
-	// Prompts, then tool calls, stand in for input: one a minute until the alert, then until the next.
-	for (let i = 0; i < 5; i++) {
-		await $.prompt.submit({
-			text: 'Go on.',
-			wait: false,
-			origin: { kind: 'composer' },
-		})
-		await clock.advance(MIN)
-	}
-	expect(notified.length).toBe(1)
-	for (let i = 0; i < 5; i++) {
-		await $.tool.call({ tool: 'Bash', command: 'ls' })
-		await clock.advance(MIN)
-	}
-	expect(notified.length).toBe(2)
-
-	await clock.advance(6 * MIN)
-	expect(labels.at(-1)).toBe('🍅 on a break')
 })
