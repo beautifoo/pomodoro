@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import fc from 'fast-check'
-import { onBreak, type Timer, working } from './timer'
+import { credited, onBreak, type Timer, working } from './timer'
 
 const T0 = 1_700_000_000_000
 const MINUTE = 60_000
@@ -164,6 +164,79 @@ test('a tick off a break writes exactly the timer, less any field an older versi
 		fc.property(stored, found, (timer, tick) => {
 			const older = { ...timer, checkInAt: T0 }
 			expect(Object.keys(working(older, tick)).sort()).toEqual(FIELDS)
+		}),
+	)
+})
+
+test('activity newer than the credit takes it for this repository', () => {
+	expect(credited({ repo: '/a', repoAt: T0 }, T0 + MINUTE, '/b')).toEqual({
+		repo: '/b',
+		repoAt: T0 + MINUTE,
+	})
+})
+
+test('during a break the credit stays with the repository in use when the person left', () => {
+	expect(
+		credited(
+			{ repo: '/a', repoAt: T0, breakStart: T0 + MINUTE },
+			T0 + 5 * MINUTE,
+			'/b',
+		),
+	).toEqual({ repo: '/a', repoAt: T0, breakStart: T0 + MINUTE })
+})
+
+// A timer stored off a break, with some of its fields or none.
+const offBreak = stored.map((timer) => ({ ...timer, breakStart: undefined }))
+
+test('whatever the activity, during a break the credit stays', () => {
+	fc.assert(
+		fc.property(full, fc.nat(), fields.repo, (timer, activity, repo) => {
+			expect(credited(timer, activity, repo)).toEqual(timer)
+		}),
+	)
+})
+
+test("activity at the credit's own time leaves it", () => {
+	expect(credited({ repo: '/a', repoAt: T0 }, T0, '/b')).toEqual({
+		repo: '/a',
+		repoAt: T0,
+	})
+})
+
+// Off a break, with a credit and activity up to its time, the bounds most often.
+const notNewer = full.chain((timer) =>
+	fc.tuple(
+		fc.constant({ ...timer, breakStart: undefined }),
+		fc.nat({ max: timer.repoAt }),
+	),
+)
+
+test('activity no newer than the credit leaves it', () => {
+	fc.assert(
+		fc.property(notNewer, fields.repo, ([timer, activity], repo) => {
+			expect(credited(timer, activity, repo)).toEqual(timer)
+		}),
+	)
+})
+
+test('newer activity off a break takes the credit for this repository and keeps the rest', () => {
+	fc.assert(
+		fc.property(offBreak, fc.nat(), fields.repo, (timer, activity, repo) => {
+			fc.pre(activity > (timer.repoAt ?? -1))
+			expect(credited(timer, activity, repo)).toEqual({
+				...timer,
+				repo,
+				repoAt: activity,
+			})
+		}),
+	)
+})
+
+test('crediting twice is the same as once', () => {
+	fc.assert(
+		fc.property(stored, fc.nat(), fields.repo, (timer, activity, repo) => {
+			const once = credited(timer, activity, repo)
+			expect(credited(once, activity, repo)).toEqual(once)
 		}),
 	)
 })

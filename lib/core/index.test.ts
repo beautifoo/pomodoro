@@ -1070,7 +1070,14 @@ test('a break forgets when the person came back from the last one', () => {
 	// Input that counts to 30 seconds in, then a break.
 	const look = (at: number) => ({ type: 'look', now: at, idleMs: 0 }) as const
 	const tick = (at: number) =>
-		({ type: 'tick', now: at, timer: {}, isLocked: false, awakeAt: 0 }) as const
+		({
+			type: 'tick',
+			now: at,
+			timer: {},
+			repo: null,
+			isLocked: false,
+			awakeAt: 0,
+		}) as const
 	feed(...[0, 10, 20, 30].map((s) => look(T0 + s * 1_000)))
 	feed(tick(T0 + 3.5 * MINUTE))
 	expect(state.backAt).toBeUndefined()
@@ -1547,6 +1554,7 @@ test('the return is never before the break began, and a break from 0 is a long o
 					lastInput: breakStart,
 					breakStart,
 				},
+				repo: null,
 				isLocked: false,
 				awakeAt: now - MINUTE,
 			},

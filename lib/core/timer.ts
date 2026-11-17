@@ -86,3 +86,15 @@ export const working = (
 	repoAt: timer.repoAt,
 	counted,
 })
+
+// The tally credits the repository of the ticking session with the latest activity: this one's, once its `activity` is
+// newer than the credit's, or there's none. Not during a break: the stretch before it, and the break, count for the
+// repository in use when the person left.
+export const credited = (
+	timer: Timer,
+	activity: number,
+	repo: string | null,
+): Timer =>
+	timer.breakStart == null && activity > (timer.repoAt ?? -1)
+		? { ...timer, repo, repoAt: activity }
+		: timer

@@ -1,5 +1,5 @@
 import { type Language, messages } from './messages'
-import { onBreak, type Timer, working } from './timer'
+import { credited, onBreak, type Timer, working } from './timer'
 
 export type { Timer } from './timer'
 
@@ -72,12 +72,13 @@ type Event =
 	| { type: 'activity'; now: number; byPerson: boolean }
 	// A look at the system's input idle time, which ioreg reads.
 	| { type: 'look'; now: number; idleMs: number }
-	// The minute's tick, with the stored timer, whether the screen is locked, and the instance's last tick or look before
-	// it (0: none), when the Mac was last awake as far as this session knows.
+	// The minute's tick, with the stored timer, the session's repository, whether the screen is locked, and the
+	// instance's last tick or look before it (0: none), when the Mac was last awake as far as this session knows.
 	| {
 			type: 'tick'
 			now: number
 			timer: Timer
+			repo: string | null
 			isLocked: boolean
 			awakeAt: number
 	  }
@@ -275,23 +276,11 @@ export function createInstance(
 				'"IOConsoleLocked" = Yes',
 			)
 		const now = await host.now()
-		let timer: Timer = (await host.load('timer')) ?? {}
-		// The tally credits the repository of the session with the latest activity: this one's, once its activity is newer
-		// than that stored, or none is. Only a ticking session writes it, so a `claude -p` run elsewhere takes no credit. Not
-		// during a break: the stretch before it, and the break, count for the repository in use when the person left.
-		if (
-			timer.breakStart === undefined &&
-			state.lastActivity > (timer.repoAt ?? -1)
-		)
-			timer = {
-				...timer,
-				repo: await host.repo().catch(() => null),
-				repoAt: state.lastActivity,
-			}
 		for (const effect of feed({
 			type: 'tick',
 			now,
-			timer,
+			timer: (await host.load('timer')) ?? {},
+			repo: await host.repo().catch(() => null),
 			isLocked,
 			awakeAt,
 		})) {
@@ -506,11 +495,19 @@ function inputCounts(
 
 function tick(
 	previous: State,
-	{ now, timer, isLocked, awakeAt }: Extract<Event, { type: 'tick' }>,
+	{
+		now,
+		timer: stored,
+		repo: here,
+		isLocked,
+		awakeAt,
+	}: Extract<Event, { type: 'tick' }>,
 	settings: Settings,
 	language: Language,
 ): { state: State; effects: Effect[] } {
 	const text = messages[language]
+	// Only a ticking session takes the credit, so a `claude -p` run elsewhere takes none.
+	const timer = credited(stored, previous.lastActivity, here)
 	// The lock first, kept from the first tick that saw it: once a tick sees the screen unlocked, the looks kept meanwhile
 	// count.
 	const state = counted(
