@@ -433,12 +433,7 @@ export const messages: Record<Language, Messages> = {
 }
 
 // The command that prints the Mac's preferred languages, first first.
-export const APPLE_LANGUAGES = [
-	'defaults',
-	'read',
-	'-g',
-	'AppleLanguages',
-] as const
+const APPLE_LANGUAGES = ['defaults', 'read', '-g', 'AppleLanguages'] as const
 
 // A language's code, its English name and its own name, as a person may write it.
 const NAMES: Record<Language, string[]> = {
@@ -467,12 +462,17 @@ function named(name: string): Language | undefined {
 // Claude Code's free-text `language` setting; else the Mac's first preferred language (`defaults` output, an old-style
 // plist, which quotes a code only when it has more than letters: (it, "en-US")); else English. A setting that's set but
 // not one of ours is English, not the Mac's.
-export function languageFrom(
-	setting: unknown,
-	appleLanguages: string,
-): Language {
+function languageFrom(setting: unknown, appleLanguages: string): Language {
 	if (typeof setting === 'string' && setting.trim() !== '')
 		return named(setting) ?? 'en'
 	const first = appleLanguages.match(/\(\s*"?([^",\s)]+)/)?.[1]
 	return (first === undefined ? undefined : named(first)) ?? 'en'
 }
+
+// The language the person reads: the agent's own setting (Claude Code's `language`; Pi has none), else the Mac's, which
+// `run` reads.
+export const languageOf = async (
+	setting: unknown,
+	run: (argv: readonly string[], timeoutMs?: number) => Promise<string>,
+): Promise<Language> =>
+	languageFrom(setting, await run(APPLE_LANGUAGES, 5_000).catch(() => ''))

@@ -15,7 +15,7 @@ import {
 	type Stored,
 	settingsFrom,
 } from './core'
-import { type Language, languageFrom, messages } from './messages'
+import { type Language, languageOf, messages } from './messages'
 
 // A file's JSON, or undefined when it's missing or unreadable.
 const load = (path: string): Promise<unknown> =>
@@ -68,6 +68,9 @@ export default function (pi: ExtensionAPI) {
 	// The Mac's first language, read at the session's start.
 	let language: Language = 'en'
 
+	const run: Host['run'] = async ([file, ...args], timeoutMs) =>
+		(await pi.exec(file, args, { timeout: timeoutMs })).stdout
+
 	// Pi's side of core, for a session in `cwd`; `ui` only in the terminal UI.
 	const host = (cwd: string, ui: ExtensionUIContext | undefined): Host => ({
 		now: async () => Date.now(),
@@ -82,8 +85,7 @@ export default function (pi: ExtensionAPI) {
 		load: async (key) =>
 			(await load(paths[key])) as Stored[typeof key] | undefined,
 		save: (key, value) => save(paths[key], value),
-		run: async ([file, ...args], timeoutMs) =>
-			(await pi.exec(file, args, { timeout: timeoutMs })).stdout,
+		run,
 		// The main repository, from a worktree too, as Claude Code's session.repo() gives: the folder of its .git.
 		repo: async () => {
 			const { code, stdout } = await pi
@@ -113,10 +115,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on('session_start', async (_, ctx) => {
 		instance = undefined
 		off = undefined
-		const mac = await pi
-			.exec('defaults', ['read', '-g', 'AppleLanguages'], { timeout: 5_000 })
-			.catch(() => ({ stdout: '' }))
-		language = languageFrom(undefined, mac.stdout)
+		language = await languageOf(undefined, run)
 		const read = await readSettings(settingsPath, language)
 		// No timer, as in Claude Code with a setting that doesn't fit; Claude Code says why only in its debug log.
 		if ('problems' in read) {

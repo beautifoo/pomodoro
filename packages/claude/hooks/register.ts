@@ -8,12 +8,7 @@ import {
 	type Stored,
 	settingsFrom,
 } from './core'
-import {
-	APPLE_LANGUAGES,
-	type Language,
-	languageFrom,
-	messages,
-} from './messages'
+import { type Language, languageOf, messages } from './messages'
 
 // What core keeps across a reload, in $.state: a reload (a /config change) starts the module over, not the session.
 // The key is named for what it holds, the number 0.6.1 kept there too, so an update doesn't repeat a check-in.
@@ -88,10 +83,7 @@ export const register: Register = (on, options) => {
 		const setting = await $.settings
 			.read({ key: 'language' })
 			.catch(() => undefined)
-		const mac = await $.process
-			.run([...APPLE_LANGUAGES], { cwd: '/', timeoutMs: 5_000 })
-			.catch(() => ({ stdout: '' }))
-		language = languageFrom(setting, mac.stdout)
+		language = await languageOf(setting, host($).run)
 		// /config's rows were described before the language was known.
 		$.ui.invalidate('config.describe')
 		// Immediate: /pomodoro quiet typed while a turn is in flight runs at once, not once the turn ends. Nothing it does

@@ -1,25 +1,87 @@
 import { expect, test } from 'bun:test'
-import { type Language, languageFrom, messages } from './messages'
+import fc from 'fast-check'
+import { type Language, languageOf, messages } from './messages'
 
-test("languageFrom follows Claude Code's setting, then the Mac's first language, then English", () => {
-	const mac = '(\n    "zh-Hans-CH",\n    "en-US"\n)'
-	expect(languageFrom('  Italiano ', mac)).toBe('it')
-	expect(languageFrom('GERMAN', '')).toBe('de')
-	expect(languageFrom('français', '')).toBe('fr')
-	expect(languageFrom('Español', '')).toBe('es')
-	expect(languageFrom('pt-BR', '')).toBe('pt')
-	expect(languageFrom('русский', '')).toBe('ru')
-	expect(languageFrom('中文', '')).toBe('zh')
-	expect(languageFrom('Brazilian Portuguese', mac)).toBe('pt') // the first word that names one
-	expect(languageFrom('Chinese (Simplified)', '')).toBe('zh')
-	expect(languageFrom('japanese', mac)).toBe('en') // set but not one of ours
-	expect(languageFrom(undefined, mac)).toBe('zh')
-	// `defaults` quotes only a code with more than letters in it.
-	expect(languageFrom(undefined, '(\n    it,\n    "en-US"\n)')).toBe('it')
-	expect(languageFrom(undefined, '(\n    de\n)')).toBe('de')
-	expect(languageFrom('', '(\n    "fr-CH"\n)')).toBe('fr') // empty is unset
-	expect(languageFrom(42, '')).toBe('en')
-	expect(languageFrom(undefined, 'garbage')).toBe('en')
+// A Mac whose preferred languages, as `defaults` prints them, are `output`; any other command prints nothing.
+const mac =
+	(output: string) =>
+	async (argv: readonly string[]): Promise<string> =>
+		argv.join(' ') === 'defaults read -g AppleLanguages' ? output : ''
+
+test.each([
+	['  Italiano ', 'it'],
+	['GERMAN', 'de'],
+	['français', 'fr'],
+	['Español', 'es'],
+	['pt-BR', 'pt'],
+	['русский', 'ru'],
+	['中文', 'zh'],
+	['Brazilian Portuguese', 'pt'], // the first word that names one
+	['Chinese (Simplified)', 'zh'],
+	['japanese', 'en'], // set but not one of ours
+] as const)(
+	"Claude Code's setting %p comes before the Mac's language",
+	async (setting, language) => {
+		expect(
+			await languageOf(setting, mac('(\n    "zh-Hans-CH",\n    "en-US"\n)')),
+		).toBe(language)
+	},
+)
+
+// `defaults` quotes only a code with more than letters in it.
+test.each([
+	[undefined, '(\n    "zh-Hans-CH",\n    "en-US"\n)', 'zh'],
+	[undefined, '(\n    it,\n    "en-US"\n)', 'it'],
+	[undefined, '(\n    de\n)', 'de'],
+	['', '(\n    "fr-CH"\n)', 'fr'], // empty is unset
+	[42, '(\n    es\n)', 'es'], // so is anything but text
+	[undefined, '(\n    ja\n)', 'en'],
+	[undefined, 'garbage', 'en'],
+] as const)(
+	"without a setting (%p), the Mac's first language decides: %p",
+	async (setting, output, language) => {
+		expect(await languageOf(setting, mac(output))).toBe(language)
+	},
+)
+
+// Off macOS, or when `defaults` fails, `run` rejects.
+test.each([
+	['Deutsch', 'de'],
+	[undefined, 'en'],
+] as const)(
+	"without the Mac's language, setting %p reads as %p",
+	async (setting, language) => {
+		expect(
+			await languageOf(setting, async () => {
+				throw new Error('ENOENT')
+			}),
+		).toBe(language)
+	},
+)
+
+test('any setting and any Mac read as one of the 8 languages', async () => {
+	await fc.assert(
+		fc.asyncProperty(
+			fc.anything(),
+			// What `defaults` prints for a first code, anything else, or nothing it can run.
+			fc.option(
+				fc.oneof(
+					fc.string().map((code) => `(\n    "${code}"\n)`),
+					fc.string(),
+				),
+				{ nil: undefined },
+			),
+			async (setting, output) => {
+				const run = async (argv: readonly string[]) => {
+					if (output === undefined) throw new Error('ENOENT')
+					return mac(output)(argv)
+				}
+				expect(['en', 'it', 'de', 'fr', 'es', 'pt', 'ru', 'zh']).toContain(
+					await languageOf(setting, run),
+				)
+			},
+		),
+	)
 })
 
 const DAY = {
