@@ -1,28 +1,12 @@
 import { type Language, messages } from './messages'
+import { onBreak, type Timer, working } from './timer'
+
+export type { Timer } from './timer'
 
 // The work-and-break rhythm the pomodoro plugins share. Each agent creates an instance for each session
 // (createInstance), with a host that does its I/O, and passes it the session's events; whatever only one agent does
 // stays in that agent's code (docs/adr/0001). Inside, step() is pure: it says what to do, and the instance does it.
 
-// Shared by every open session through the agent's store: one pomodoro per person, not per session. `blockStart` is when
-// the stretch of work since the last break began, `done` the pomodoros of the set before it, `lastInput` the person's
-// own (while quiet, the person is there until a tick sees the screen locked), `agentAt` the main agent's last activity,
-// `breakStart` when the break under way began, and `quiet` whether /pomodoro quiet is on. `repo` is the repository the
-// tally credits, that of the ticking session with the latest activity, at `repoAt`; `counted` the pomodoros of this
-// stretch already in the tally.
-export type Timer = {
-	blockStart?: number
-	done?: number
-	seenAt?: number
-	alertedAt?: number
-	lastInput?: number
-	agentAt?: number
-	breakStart?: number
-	quiet?: boolean
-	repo?: string | null
-	repoAt?: number
-	counted?: number
-}
 // The agent's summary at a check-in, kept for /pomodoro today.
 export type CheckIn = { at: number; repo: string | null; text: string }
 // The tally /pomodoro today counts, by repository: a pomodoro when its 25 minutes were up (0.7.0's also have `run`, the
@@ -565,10 +549,8 @@ function tick(
 		)
 
 	// The break began at the person's own last input, not the agent's. It forgets the last return: the look that counts
-	// the next one sets it again, and where another session's input ends this break first, there's none to read. The
-	// stretch before it, the set, the tally's and the last alert are kept for the return, which may find it was none;
-	// quiet isn't.
-	const { repo = null, repoAt } = timer
+	// the next one sets it again, and where another session's input ends this break first, there's none to read.
+	const { repo = null } = timer
 	let inTally = timer.counted ?? 0
 	if (idle >= SHORT_BREAK)
 		return {
@@ -581,18 +563,7 @@ function tick(
 			effects: [
 				{
 					type: 'persist',
-					timer: {
-						blockStart: timer.blockStart,
-						done: timer.done,
-						seenAt: now,
-						alertedAt: timer.alertedAt,
-						lastInput,
-						agentAt,
-						breakStart: timer.breakStart ?? lastInput,
-						repo,
-						repoAt,
-						counted: inTally,
-					},
+					timer: onBreak(timer, { now, lastInput, agentAt }),
 				},
 				{
 					type: 'show',
@@ -661,18 +632,16 @@ function tick(
 	effects.push(
 		{
 			type: 'persist',
-			timer: {
-				blockStart,
-				done,
-				seenAt: now,
-				alertedAt: shouldAlert ? now : alertedAt,
+			timer: working(timer, {
+				now,
 				lastInput,
 				agentAt,
+				blockStart,
+				done,
+				alertedAt: shouldAlert ? now : alertedAt,
 				quiet: isQuiet,
-				repo,
-				repoAt,
 				counted: Math.max(inTally, up),
-			},
+			}),
 		},
 		{
 			type: 'show',

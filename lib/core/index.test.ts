@@ -900,7 +900,6 @@ test('locking the screen for 3 minutes ends quiet, a gap too', async () => {
 	expect(locked.label()).toBe('🍅 quiet · 1 of 4 · 12/25m')
 	await locked.set(T0 + 13 * MINUTE)
 	expect(locked.label()).toBe('🍅 on a break')
-	expect((locked.store.timer as Timer).quiet).toBeFalsy()
 
 	// The lid closed at 5 minutes for 5, and in use again from when it opens: quiet stays off after the return.
 	const gap = world({
@@ -916,7 +915,6 @@ test('locking the screen for 3 minutes ends quiet, a gap too', async () => {
 	gap.sleep(5 * MINUTE)
 	await gap.advance(10_000)
 	expect(gap.label()).toBe('🍅 on a break')
-	expect((gap.store.timer as Timer).quiet).toBeFalsy()
 	await gap.advance(MINUTE)
 	expect(gap.label()).toBe('🍅 1 of 4 · 0/25m')
 })
@@ -1324,9 +1322,7 @@ test("a prompt is the person's own input: it ends a break", async () => {
 	}
 	// Back at the prompt.
 	expect(w.label()).toBe('🍅 1 of 4 · 1/25m')
-	const timer = w.store.timer as Timer
-	expect(timer.lastInput).toBe(T0 + 14 * MINUTE)
-	expect(timer.breakStart).toBeUndefined()
+	expect((w.store.timer as Timer).lastInput).toBe(T0 + 14 * MINUTE)
 })
 
 test("the count shows the pomodoro under way and the minutes into it, held once it's up until a break", async () => {

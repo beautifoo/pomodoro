@@ -3,5 +3,7 @@
 node_modules/
 packages/claude/hooks/core.ts
 packages/claude/hooks/messages.ts
+packages/claude/hooks/timer.ts
 packages/pi/core.ts
 packages/pi/messages.ts
+packages/pi/timer.ts

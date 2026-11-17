@@ -21,7 +21,7 @@
 		"types"
 	],
 	"scripts": {
-		"build": "cp ../../lib/core/index.ts hooks/core.ts && cp ../../lib/core/messages.ts hooks/messages.ts",
+		"build": "cp ../../lib/core/index.ts hooks/core.ts && cp ../../lib/core/messages.ts hooks/messages.ts && cp ../../lib/core/timer.ts hooks/timer.ts",
 		"prepack": "npm run build"
 	}
 }

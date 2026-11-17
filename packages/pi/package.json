@@ -18,7 +18,8 @@
 	"files": [
 		"index.ts",
 		"core.ts",
-		"messages.ts"
+		"messages.ts",
+		"timer.ts"
 	],
 	"pi": {
 		"extensions": [
@@ -26,7 +27,7 @@
 		]
 	},
 	"scripts": {
-		"build": "cp ../../lib/core/index.ts core.ts && cp ../../lib/core/messages.ts messages.ts",
+		"build": "cp ../../lib/core/index.ts core.ts && cp ../../lib/core/messages.ts messages.ts && cp ../../lib/core/timer.ts timer.ts",
 		"prepack": "npm run build"
 	},
 	"peerDependencies": {
