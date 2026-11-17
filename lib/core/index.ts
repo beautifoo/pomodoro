@@ -25,10 +25,11 @@ export type Timer = {
 }
 // The agent's summary at a check-in, kept for /pomodoro today.
 export type CheckIn = { at: number; repo: string | null; text: string }
-// The tally /pomodoro today counts, by repository: a pomodoro when its 25 minutes were up, `run` the start of its
-// stretch; a break when the person came back, `ms` away after a stretch of `runMs`.
+// The tally /pomodoro today counts, by repository: a pomodoro when its 25 minutes were up (0.7.0's also have `run`, the
+// start of its stretch, which nothing reads now); a break when the person came back, `ms` away after a stretch of
+// `runMs`.
 export type TallyEntry =
-	| { at: number; repo: string | null; kind: 'pomodoro'; run: number }
+	| { at: number; repo: string | null; kind: 'pomodoro' }
 	| {
 			at: number
 			repo: string | null
@@ -616,14 +617,14 @@ function tick(
 		// Less than a break's length away is no break: input counts only once three looks saw it, so a tick can find a
 		// break the person came back from just before. Then the stretch goes on, as if none was found.
 		if (backAt - leftAt >= SHORT_BREAK) {
-			// The pomodoros up before the break count, one cut short doesn't; a long break starts a new set. A break that
+			// The pomodoro up before the break counts, one cut short doesn't; a long break starts a new set. A break that
 			// began before any activity (at 0, off macOS) began long ago.
 			away = backAt - leftAt
 			const runMs = Math.max(0, leftAt - blockStart)
-			const upBefore = Math.floor(runMs / POMODORO)
+			const upBefore = runMs >= POMODORO ? 1 : 0
 			done = away >= LONG_BREAK ? 0 : done + upBefore
-			// Into the tally: those no tick saw up (the lid closed right after one), and the break, unless it began before
-			// any activity, which has no length to tell. None of the new stretch's are in yet.
+			// Into the tally: the pomodoro if no tick saw it up (the lid closed right after it), and the break, unless it
+			// began before any activity, which has no length to tell. None of the new stretch's is in yet.
 			entries.push(...pomodoros(blockStart, inTally, upBefore, repo))
 			if (leftAt !== 0)
 				entries.push({ at: backAt, repo, kind: 'break', ms: away, runMs })
@@ -635,14 +636,15 @@ function tick(
 	const minutes = Math.floor(worked / MINUTE)
 	// A pomodoro goes into the tally once the person's own input is 25 minutes in, by the first session to tick then: one
 	// up after they left is cut short by the break, as the set counts it.
-	const up = Math.floor(Math.max(0, lastInput - blockStart) / POMODORO)
+	const up = lastInput - blockStart >= POMODORO ? 1 : 0
 	entries.push(...pomodoros(blockStart, inTally, up, repo))
 	// Once a pomodoro is up, a break is due, except while quiet: then the count goes on, but nothing asks for one, the
 	// alert, the warning or the notes to the agent.
 	const isDue = worked >= POMODORO && !isQuiet
-	// The pomodoro under way in the set, and whether the set is up: after the fourth, until a long break.
-	const position = done + Math.floor(worked / POMODORO) + 1
-	const isSetUp = position > SET
+	// The pomodoro under way in the set: the next starts only after a break, so one that's up holds at 25 minutes until
+	// then. Once it's up, whether the set is: from the fourth on, until a long break.
+	const position = done + 1
+	const isSetUp = position >= SET
 	const alertedAt = timer.alertedAt ?? 0
 	// Not once the person has been away a while, nor while the screen is locked: that may be the break already under way.
 	const shouldAlert =
@@ -669,7 +671,7 @@ function tick(
 		},
 		{
 			type: 'show',
-			label: `${tomato(settings, 'pomodoro ')}${isQuiet ? `${text.quiet} · ` : ''}${text.count(position, Math.floor((worked % POMODORO) / MINUTE))}`,
+			label: `${tomato(settings, 'pomodoro ')}${isQuiet ? `${text.quiet} · ` : ''}${text.count(position, Math.floor(Math.min(worked, POMODORO) / MINUTE))}`,
 			warning: isDue
 				? `${tomato(settings)}${(isSetUp ? text.dueLong : text.due)(minutes)}`
 				: undefined,
@@ -697,17 +699,14 @@ function tick(
 			sound: settings.sound,
 		})
 	if (entries.length > 0) effects.push({ type: 'tally', entries })
-	// One check-in per pomodoro that ends without a break, keyed by when that pomodoro ended; one heads-up per pomodoro in
-	// its last minutes, keyed by when it ends, except while quiet.
+	// One check-in per pomodoro, so per stretch, once it's up and until a break, and one heads-up in its last minutes, each
+	// keyed by when it ends, except while quiet.
 	const due = isDue
-		? {
-				key: blockStart + Math.floor(worked / POMODORO) * POMODORO,
-				text: check(minutes, isSetUp),
-			}
+		? { key: blockStart + POMODORO, text: check(minutes, isSetUp) }
 		: undefined
 	const headsUp =
-		worked % POMODORO >= POMODORO - AHEAD && !isQuiet
-			? blockStart + (Math.floor(worked / POMODORO) + 1) * POMODORO
+		worked >= POMODORO - AHEAD && worked < POMODORO && !isQuiet
+			? blockStart + POMODORO
 			: undefined
 	return { state: { ...state, due, headsUp }, effects }
 }
@@ -724,11 +723,11 @@ const pomodoros = (
 		at: run + (from + i + 1) * POMODORO,
 		repo,
 		kind: 'pomodoro',
-		run,
 	}))
 
 // The check-in and the heads-up ride a tool result of the main loop, each once per pomodoro. Each counts as sent from
-// here, so two tool results at once can't both carry it.
+// here, so two tool results at once can't both carry it. A check-in's key only grows, and one kept by 0.7.0, which
+// gave one every 25 minutes, can be later in the same stretch: none is given again for it.
 function toolResult(
 	state: State,
 	isMain: boolean,
@@ -737,7 +736,7 @@ function toolResult(
 	const { due, headsUp } = state
 	let next = state
 	const effects: Effect[] = []
-	if (due !== undefined && due.key !== state.sentKey) {
+	if (due !== undefined && due.key > (state.sentKey ?? 0)) {
 		next = { ...next, sentKey: due.key, awaitingSummary: true }
 		effects.push({ type: 'checkIn', ...due })
 	}
@@ -812,11 +811,10 @@ function today(
 		now - (timer.seenAt ?? 0) < SHORT_BREAK
 			? (timer.breakStart ?? now) - timer.blockStart
 			: 0
-	const longest = Math.max(
-		0,
+	const stretches = [
 		current,
 		...breaks.filter((b) => isToday(b.at - b.ms)).map((b) => b.runMs),
-	)
+	]
 	const head =
 		todays.length === 0
 			? messages[language].noPomodoros
@@ -830,9 +828,9 @@ function today(
 							b.ms >= LONG_BREAK &&
 							todays.some((p) => p.at < b.at),
 					).length,
-					// Each stretch's pomodoros after its first.
-					skipped: todays.length - new Set(todays.map((p) => p.run)).size,
-					longest: Math.floor(longest / MINUTE),
+					// The stretches 5 minutes or more past their pomodoro, the one under way too.
+					late: stretches.filter((ms) => ms >= POMODORO + REPEAT).length,
+					longest: Math.floor(Math.max(0, ...stretches) / MINUTE),
 				})
 	return [
 		head,

@@ -7,7 +7,7 @@ A break reminder inside coding agents: once a pomodoro is up, it alerts the pers
 ### Time
 
 **Pomodoro**:
-25 minutes at the computer, the Pomodoro Technique's unit; it counts once its 25 minutes are up, and one cut short by a break doesn't. Pomodoros follow one another until a break.
+25 minutes at the computer, the Pomodoro Technique's unit; it counts once its 25 minutes are up, and one cut short by a break doesn't. The next starts only after a break: until one, the pomodoro that's up holds.
 _Avoid_: block, work block, work period
 
 **Set**:
@@ -21,6 +21,9 @@ A break of 3 up to 15 minutes, the paper's 3 to 5 and longer; the set carries on
 
 **Long break**:
 A break of 15 minutes or more, the paper's 15 to 30 and longer; it starts a new set.
+
+**Late break**:
+A break that comes 5 minutes or more after the pomodoro is up, its stretch 30 minutes or longer; `/pomodoro today` counts the stretch under way as one once it's that long.
 
 **Gap**:
 3 minutes or more with no tick in any session of the agent, as with a closed lid or no session open.
@@ -59,7 +62,7 @@ The agent's own turn, as opposed to a subagent's run.
 ### What the person and the agent get
 
 **Count**:
-The pomodoro under way in the set and the minutes into it: `🍅 3 of 4 · 12/25m`, and on past 4 (`5 of 4`, `6 of 4`…) after the fourth until a long break. The warning beside it once a break is due keeps the minutes since the last break: `🍅 52m, time for a break`.
+The pomodoro under way in the set and the minutes into it: `🍅 3 of 4 · 12/25m`, held at `25/25m` once it's up until a break, and on past 4 (`5 of 4`, `6 of 4`…) after the fourth until a long break. The warning beside it once a break is due keeps the minutes since the last break: `🍅 52m, time for a break`.
 
 **Alert**:
 The agent's own alert (in Claude Code a toast, and a banner where the terminal raises one; in Pi a warning line) and a chime when a pomodoro is up, asking for a short break, or a long one at the end of a set.
@@ -78,21 +81,21 @@ The paragraph starting "Pomodoro:" that the agent may write after a check-in, un
 The summaries of the last 14 days, with their time and repository; `/pomodoro today` lists today's in the session's repository.
 
 **Tally**:
-The pomodoros and breaks of the last 14 days, each with the repository in use, that of the session with the latest activity; `/pomodoro today` counts today's in the session's repository.
+The pomodoros and breaks of the last 14 days, each with the repository in use, that of the session with the latest activity; `/pomodoro today` counts today's in the session's repository, with the late breaks and the longest stretch.
 
 ## Relationships
 
 - An **Agent** keeps one **Shared timer**, which all its **Sessions** read and write; Claude Code and Pi keep one each.
-- A **Break** ends the **Pomodoro** under way; without one, **Pomodoros** follow back to back.
+- A **Break** ends the **Pomodoro** under way, and the next starts after it; without one, none does.
 - A **Short break** keeps the **Set**; a **Long break** starts a new one. Once the fourth **Pomodoro** of a **Set** is up, the **Alert**, the warning and the **Check-in** ask for a **Long break** until one comes.
 - The first **Alert** comes when a **Pomodoro** is up, then one every 5 minutes until a **Break**, once per **Agent**, and none while **Quiet**.
-- Each **Session** gets at most one **Check-in** per **Pomodoro** that ends without a **Break**, on its **Main loop**'s next tool result; one not sent by the time the next **Pomodoro** ends gives way to that **Pomodoro**'s. Likewise one **Heads-up** per **Pomodoro**, before it ends. Neither while **Quiet**.
+- Each **Session** gets at most one **Check-in** per **Pomodoro**, on its **Main loop**'s first tool result once the **Pomodoro** is up and until a **Break**. Likewise one **Heads-up** per **Pomodoro**, before it ends. Neither while **Quiet**.
 - A **Check-in** gets at most one **Summary**, which goes into the **Log**.
 
 ## Example dialogue
 
 > **Dev:** "The person has worked 52 minutes straight after a **Long break**, with one session open and the agent busy all along: how many **Check-ins** did it get?"
-> **Domain expert:** "Two, one per **Pomodoro**: just after 25 and just after 50 minutes, each on the next tool result of the **Main loop**. Had the agent sat idle from 20 to 52 minutes while the person worked, only one, for the second **Pomodoro**. The **Count** reads `3 of 4 · 2/25m`, the third **Pomodoro** of the **Set**, 2 minutes in, and the warning `52m`, since it runs from the last **Break**."
+> **Domain expert:** "One, just after 25 minutes, on the next tool result of the **Main loop**: without a **Break**, no second **Pomodoro** starts, so none at 50. Had the agent sat idle from 20 to 52 minutes while the person worked, still one, on its first tool result after that. The **Count** reads `1 of 4 · 25/25m`, the first **Pomodoro** of the **Set**, up and held there, and the warning `52m`, since it runs from the last **Break**; a **Break** now would be a **Late break**."
 > **Dev:** "And if the lid was closed for ten minutes in between?"
 > **Domain expert:** "That **Gap** is a **Short break**: a **Pomodoro** it cut short doesn't count, the next starts when the person is back, and the **Set** carries on."
 
@@ -100,4 +103,4 @@ The pomodoros and breaks of the last 14 days, each with the repository in use, t
 
 - "Pomodoro" names both the product and its unit, as in the technique ("the Pomodoro Technique", "a Pomodoro"): resolved, "Pomodoro" with no article is the product (the Claude Code plugin and the Pi extension), and "a pomodoro" is the unit. The count's word without the emoji ("pomodoro 3 of 4 · 12/25m", "pomodoro on a break") is the product's name.
 - "block", "work block" and "work period" meant a **Pomodoro**: resolved, it's a **Pomodoro**, the technique's word. The code keeps `blockStart` (stored in the shared timer) for when the stretch since the last break began.
-- A **Pomodoro** here follows the paper (Cirillo, _The Pomodoro Technique_, v1.3, 2007) in its lengths: 25 minutes, a **Short break** from 3 minutes, a **Long break** from 15 after a **Set** of four, and one cut short doesn't count. Where it differs: it starts by itself with the first input after a break, not for a task; a break is found, not taken when the timer rings; and without one, the next pomodoro starts at once, which is what the **Alert** is about.
+- A **Pomodoro** here follows the paper (Cirillo, _The Pomodoro Technique_, v1.3, 2007) in its lengths: 25 minutes, a **Short break** from 3 minutes, a **Long break** from 15 after a **Set** of four, and one cut short doesn't count. Where it differs: it starts by itself with the first input after a break, not for a task; and a break is found, not taken when the timer rings, so the pomodoro that's up holds until one comes, which is what the **Alert** is about.

@@ -6,7 +6,7 @@ After 25 minutes without a break, you get a reminder to take one, and your agent
 pi install npm:@beautifoo/pi-pomodoro
 ```
 
-It runs in Pi's terminal UI only, not with `-p`, `--mode json` or RPC. The footer counts your pomodoros in sets of four, and your minutes. A break is 3 minutes with no keyboard or mouse input and no work from the agent (macOS idle time; elsewhere, no prompt, reply or tool call in any Pi session), and a long one, due after the fourth pomodoro, 15 minutes or more. `/pomodoro today` counts today's pomodoros and lists the check-ins in the repository you're in, and `/pomodoro quiet` holds the alerts during a meeting.
+It runs in Pi's terminal UI only, not with `-p`, `--mode json` or RPC. The footer counts your pomodoros in sets of four, and your minutes; the next pomodoro starts only after a break. A break is 3 minutes with no keyboard or mouse input and no work from the agent (macOS idle time; elsewhere, no prompt, reply or tool call in any Pi session), and a long one, due after the fourth pomodoro, 15 minutes or more. `/pomodoro today` counts today's pomodoros and lists the check-ins in the repository you're in, and `/pomodoro quiet` holds the alerts during a meeting.
 
 Settings go in `~/.pi/agent/pomodoro-settings.json`, read when a session starts or on `/reload`, with these defaults:
 

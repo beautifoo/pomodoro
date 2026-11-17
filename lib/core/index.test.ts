@@ -221,7 +221,7 @@ test('alerts when a pomodoro is up, then every 5 minutes while there is no break
 	expect(w.notified).toEqual([])
 	await w.advance(MINUTE)
 	expect(w.shows.at(-1)).toEqual({
-		label: '🍅 2 of 4 · 0/25m',
+		label: '🍅 1 of 4 · 25/25m',
 		warning: '🍅 25m, time for a break',
 	})
 	await w.advance(5 * MINUTE)
@@ -360,7 +360,7 @@ test('over SSH ioreg never runs: activity stands in, and 3 minutes without it is
 	expect(w.toasts).toEqual([])
 })
 
-test("one check-in per pomodoro, on a main-loop tool result, kept so that a reloaded instance gives only the next pomodoro's", async () => {
+test("one check-in per pomodoro, so one until a break, on a main-loop tool result, kept so that a reloaded instance doesn't give it again", async () => {
 	const w = world()
 	const pomodoro = start(w)
 	await w.advance(26 * MINUTE)
@@ -379,17 +379,29 @@ test("one check-in per pomodoro, on a main-loop tool result, kept so that a relo
 	const reloaded = start(w, {}, { kept: w.keeps[0] })
 	await w.settle()
 	expect(reloaded.toolResult(true)).toEqual({})
+	// Still no break 25 minutes later: no next pomodoro, so no second check-in.
 	await w.advance(25 * MINUTE)
-	expect(reloaded.toolResult(true).checkIn).toStartWith(
-		'[Pomodoro] The user has been working for 51 minutes without a break.',
-	)
-	expect(w.keeps).toEqual([T0 + 25 * MINUTE, T0 + 50 * MINUTE])
+	expect(reloaded.toolResult(true)).toEqual({})
+	expect(w.keeps).toEqual([T0 + 25 * MINUTE])
+})
+
+// 0.7.0 gave a check-in every 25 minutes: the one it kept, the second of this stretch, stands for this pomodoro's.
+test('a check-in kept by 0.7.0 later in the stretch is not given again', async () => {
+	const blockStart = T0 - 55 * MINUTE
+	const w = world({
+		seed: {
+			timer: { blockStart, seenAt: T0 - 30_000, lastInput: T0, counted: 2 },
+		},
+	})
+	const pomodoro = start(w, {}, { kept: blockStart + 50 * MINUTE })
+	await w.settle()
+	expect(pomodoro.toolResult(true)).toEqual({})
 })
 
 const HEADS_UP =
 	"[Pomodoro] The user's pomodoro ends in about 5 minutes. Bring the current step to a stopping point, and don't start anything big."
 
-test('the heads-up comes once, 5 minutes before each pomodoro ends, on a main-loop tool result', async () => {
+test('the heads-up comes once, 5 minutes before the pomodoro ends, on a main-loop tool result', async () => {
 	const w = world()
 	const pomodoro = start(w)
 	await w.set(T0 + 19 * MINUTE)
@@ -399,11 +411,23 @@ test('the heads-up comes once, 5 minutes before each pomodoro ends, on a main-lo
 	expect(pomodoro.toolResult(true)).toEqual({ headsUp: HEADS_UP })
 	await w.set(T0 + 21 * MINUTE)
 	expect(pomodoro.toolResult(true)).toEqual({})
-	// The check-in when this pomodoro is up, then the next pomodoro's heads-up.
+	// The check-in when this pomodoro is up, and with no break, no next pomodoro to give a heads-up for.
 	await w.set(T0 + 26 * MINUTE)
 	expect(pomodoro.toolResult(true).headsUp).toBeUndefined()
 	await w.set(T0 + 45 * MINUTE + 30_000)
-	expect(pomodoro.toolResult(true)).toEqual({ headsUp: HEADS_UP })
+	expect(pomodoro.toolResult(true)).toEqual({})
+
+	// After a break, the next pomodoro's.
+	const back = T0 + 29 * MINUTE + 10_000
+	const rested = world({
+		idle: inputs([
+			...steady(T0, T0 + 25 * MINUTE),
+			...steady(back, back + 25 * MINUTE),
+		]),
+	})
+	const next = start(rested)
+	await rested.set(back + 21 * MINUTE)
+	expect(next.toolResult(true)).toEqual({ headsUp: HEADS_UP })
 
 	// None while quiet.
 	const quiet = world()
@@ -449,12 +473,12 @@ test("the check-in's summary is logged from the first reply that has one, until 
 		{ at: T0 + 26 * MINUTE, repo: '/code/app', text: 'Pomodoro: on the goal.' },
 	])
 
-	// The next pomodoro's check-in, in a turn that ends without its summary.
-	await w.advance(25 * MINUTE)
-	expect(pomodoro.toolResult(true).checkIn).toBeDefined()
-	pomodoro.turnEnded()
-	await pomodoro.reply('Pomodoro: the next turn.')
-	expect(texts(w.store.checkIns)).toEqual(['Pomodoro: on the goal.'])
+	// A check-in in a turn that ends without its summary.
+	const next = world()
+	const ended = await checkedIn(next)
+	ended.turnEnded()
+	await ended.reply('Pomodoro: the next turn.')
+	expect(next.store.checkIns).toBeUndefined()
 })
 
 test('the summary is the first paragraph that starts with Pomodoro:, and nothing else is', async () => {
@@ -465,11 +489,13 @@ test('the summary is the first paragraph that starts with Pomodoro:, and nothing
 	await pomodoro.reply(
 		'Ran the tests.\n\n**Pomodoro:** on the goal, the parser is next.\nTake a break.\n\n Pomodoro: again.',
 	)
-	await w.advance(25 * MINUTE)
-	expect(pomodoro.toolResult(true).checkIn).toBeDefined()
-	await pomodoro.reply('## Pomodoro check-in: done so far.')
 	expect(texts(w.store.checkIns)).toEqual([
 		'Pomodoro: on the goal, the parser is next.\nTake a break.',
+	])
+	const next = world()
+	const again = await checkedIn(next)
+	await again.reply('## Pomodoro check-in: done so far.')
+	expect(texts(next.store.checkIns)).toEqual([
 		'Pomodoro check-in: done so far.',
 	])
 })
@@ -494,7 +520,7 @@ test("check-ins older than 14 days are dropped, and /pomodoro today lists only t
 	await pomodoro.reply('Pomodoro: today.')
 	expect(texts(w.store.checkIns)).toEqual(['Two days ago.', 'Pomodoro: today.'])
 	expect(await pomodoro.command('today')).toMatch(
-		/^Today: 🍅 1 pomodoro \(yesterday 0\), 0 long breaks, 0 breaks skipped, longest 26m\n\d\d:\d\d {2}Pomodoro: today\.$/,
+		/^Today: 🍅 1 pomodoro \(yesterday 0\), 0 long breaks, 0 late breaks, longest 26m\n\d\d:\d\d {2}Pomodoro: today\.$/,
 	)
 })
 
@@ -527,8 +553,8 @@ function worldAt(at: number, options: Parameters<typeof world>[0] = {}) {
 	return w
 }
 
-test('the tally counts pomodoros, long breaks, skipped breaks and the longest stretch', async () => {
-	// In use for 75 minutes, away for 4, in use for 26, away for 20, and in use again.
+test('the tally counts pomodoros, long breaks, late breaks and the longest stretch', async () => {
+	// In use for 75 minutes, one pomodoro and a late break, away for 4, in use for 26, away for 20, and in use again.
 	const w = worldAt(NINE, {
 		idle: inputs([
 			...steady(nine(0), nine(75)),
@@ -539,8 +565,29 @@ test('the tally counts pomodoros, long breaks, skipped breaks and the longest st
 	const pomodoro = start(w)
 	await w.set(nine(152))
 	expect(await pomodoro.command('today')).toBe(
-		'Today: 🍅 5 pomodoros (yesterday 0), 1 long break, 2 breaks skipped, longest 75m',
+		'Today: 🍅 3 pomodoros (yesterday 0), 1 long break, 1 late break, longest 75m',
 	)
+})
+
+// The stretch before it is 30 minutes or more.
+test('a break 5 minutes or more after the pomodoro is up is late', async () => {
+	for (const [length, late] of [
+		[29, '0 late breaks'],
+		[30, '1 late break'],
+	] as const) {
+		// In use for `length` minutes, away for 4, and in use again.
+		const w = worldAt(NINE, {
+			idle: inputs([
+				...steady(nine(0), nine(length)),
+				...steady(nine(length + 4) + 10_000, nine(length + 6)),
+			]),
+		})
+		const pomodoro = start(w)
+		await w.set(nine(length + 6))
+		expect(await pomodoro.command('today')).toBe(
+			`Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, ${late}, longest ${length}m`,
+		)
+	}
 })
 
 test('without the emoji, the count of the day has no tomato', async () => {
@@ -548,7 +595,7 @@ test('without the emoji, the count of the day has no tomato', async () => {
 	const pomodoro = start(w, { emoji: false })
 	await w.set(nine(26))
 	expect(await pomodoro.command('today')).toBe(
-		'Today: 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 26m',
+		'Today: 1 pomodoro (yesterday 0), 0 long breaks, 0 late breaks, longest 26m',
 	)
 })
 
@@ -569,7 +616,13 @@ test('a pomodoro cut short by a break is not in the tally', async () => {
 
 // Each counts for the repository of the session with the latest activity when it ended.
 test("/pomodoro today counts only this repository's, and lists only its summaries", async () => {
+	// In use for 26 minutes in app, away for 4, then in use for 31 in web: the stretch under way is past 30 minutes, so
+	// it counts as late.
 	const w = worldAt(NINE, {
+		idle: inputs([
+			...steady(nine(0), nine(26)),
+			...steady(nine(30) + 10_000, nine(62)),
+		]),
 		seed: {
 			checkIns: [
 				{ at: nine(26), repo: '/code/app', text: 'Pomodoro: in app.' },
@@ -586,14 +639,14 @@ test("/pomodoro today counts only this repository's, and lists only its summarie
 	web.start()
 	await w.settle()
 	await app.activity(true)
-	await w.set(nine(51))
+	await w.set(nine(31))
 	await web.activity(true)
-	await w.set(nine(76))
+	await w.set(nine(62))
 	expect(await app.command('today')).toBe(
-		'Today: 🍅 2 pomodoros (yesterday 0), 0 long breaks, 1 break skipped, longest 0m\n09:26  Pomodoro: in app.',
+		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 0 late breaks, longest 26m\n09:26  Pomodoro: in app.',
 	)
 	expect(await web.command('today')).toBe(
-		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 76m\n09:51  Pomodoro: in web.',
+		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 1 late break, longest 31m\n09:51  Pomodoro: in web.',
 	)
 })
 
@@ -619,7 +672,7 @@ test('a stretch and the break after it count for the repository in use before th
 	await web.activity(true)
 	await w.set(nine(97))
 	expect(await app.command('today')).toBe(
-		'Today: 🍅 3 pomodoros (yesterday 0), 1 long break, 2 breaks skipped, longest 75m',
+		'Today: 🍅 1 pomodoro (yesterday 0), 1 long break, 1 late break, longest 75m',
 	)
 	expect(await web.command('today')).toBe('Today: no pomodoros yet.')
 })
@@ -640,7 +693,7 @@ test("the night before the first pomodoro is no long break, and its stretch not 
 	w.sleep(nine(-60) - w.now())
 	await w.set(nine(31))
 	expect(await pomodoro.command('today')).toBe(
-		'Today: 🍅 2 pomodoros (yesterday 2), 1 long break, 0 breaks skipped, longest 45m',
+		'Today: 🍅 2 pomodoros (yesterday 1), 1 long break, 1 late break, longest 45m',
 	)
 })
 
@@ -677,12 +730,12 @@ test('a pomodoro at 23:50 counts for that day', async () => {
 	const pomodoro = start(w)
 	await w.set(late + 27 * MINUTE)
 	expect(await pomodoro.command('today')).toBe(
-		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 27m',
+		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 0 late breaks, longest 27m',
 	)
 	w.sleep(morning - w.now())
 	await w.set(morning + 26 * MINUTE)
 	expect(await pomodoro.command('today')).toBe(
-		'Today: 🍅 1 pomodoro (yesterday 1), 0 long breaks, 0 breaks skipped, longest 25m',
+		'Today: 🍅 1 pomodoro (yesterday 1), 0 long breaks, 0 late breaks, longest 25m',
 	)
 })
 
@@ -702,7 +755,7 @@ test('a pomodoro up just before the lid closed counts, though no tick saw it', a
 	w.sleep(10 * MINUTE)
 	await w.set(nine(12))
 	expect(await pomodoro.command('today')).toBe(
-		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 0 breaks skipped, longest 25m',
+		'Today: 🍅 1 pomodoro (yesterday 0), 0 long breaks, 0 late breaks, longest 25m',
 	)
 })
 
@@ -719,7 +772,7 @@ test('two sessions add each pomodoro and each break to the tally once', async ()
 	const sessions = [start(w), start(w)]
 	await w.set(nine(55))
 	expect(w.store.tally).toEqual([
-		{ at: nine(25), repo: '/code/app', kind: 'pomodoro', run: NINE },
+		{ at: nine(25), repo: '/code/app', kind: 'pomodoro' },
 		{
 			at: nine(29) + 10_000,
 			repo: '/code/app',
@@ -727,16 +780,11 @@ test('two sessions add each pomodoro and each break to the tally once', async ()
 			ms: 4 * MINUTE + 10_000,
 			runMs: 25 * MINUTE,
 		},
-		{
-			at: nine(54) + 10_000,
-			repo: '/code/app',
-			kind: 'pomodoro',
-			run: nine(29) + 10_000,
-		},
+		{ at: nine(54) + 10_000, repo: '/code/app', kind: 'pomodoro' },
 	] satisfies TallyEntry[])
 	for (const pomodoro of sessions)
 		expect(await pomodoro.command('today')).toBe(
-			'Today: 🍅 2 pomodoros (yesterday 0), 0 long breaks, 0 breaks skipped, longest 25m',
+			'Today: 🍅 2 pomodoros (yesterday 0), 0 long breaks, 0 late breaks, longest 25m',
 		)
 })
 
@@ -745,7 +793,6 @@ test("yesterday's count is this repository's, and the tally keeps 14 days", asyn
 		at,
 		repo,
 		kind: 'pomodoro',
-		run: at - 25 * MINUTE,
 	})
 	const w = worldAt(NINE, {
 		seed: {
@@ -761,7 +808,7 @@ test("yesterday's count is this repository's, and the tally keeps 14 days", asyn
 	const pomodoro = start(w)
 	await w.set(nine(26))
 	expect(await pomodoro.command('today')).toBe(
-		'Today: 🍅 1 pomodoro (yesterday 2), 0 long breaks, 0 breaks skipped, longest 26m',
+		'Today: 🍅 1 pomodoro (yesterday 2), 0 long breaks, 0 late breaks, longest 26m',
 	)
 	expect((w.store.tally as TallyEntry[]).map((entry) => entry.at)).toEqual([
 		NINE - 2 * DAY,
@@ -794,7 +841,7 @@ test('quiet keeps counting with no alert or check-in, and the alert comes as soo
 	expect(w.notified).toEqual([])
 	expect(pomodoro.toolResult(true)).toEqual({})
 	expect(w.shows.at(-1)).toEqual({
-		label: '🍅 quiet · 3 of 4 · 10/25m',
+		label: '🍅 quiet · 1 of 4 · 25/25m',
 		warning: undefined,
 	})
 	// Off: a tick at once, which alerts and makes the check-in due.
@@ -803,7 +850,7 @@ test('quiet keeps counting with no alert or check-in, and the alert comes as soo
 		'🍅 60 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
 	])
 	expect(w.shows.at(-1)).toEqual({
-		label: '🍅 3 of 4 · 10/25m',
+		label: '🍅 1 of 4 · 25/25m',
 		warning: '🍅 60m, time for a break',
 	})
 	expect(pomodoro.toolResult(true).checkIn).toBeDefined()
@@ -828,12 +875,12 @@ test('while quiet, sitting still is no break, however long', async () => {
 	await pomodoro.command('quiet')
 	await w.set(T0 + 41 * MINUTE)
 	expect(w.shows.map((show) => show.label)).not.toContain('🍅 on a break')
-	expect(w.label()).toBe('🍅 quiet · 2 of 4 · 16/25m')
+	expect(w.label()).toBe('🍅 quiet · 1 of 4 · 25/25m')
 	// Once it's off, sitting still counts from then: the alert, and 3 minutes later a break.
 	await pomodoro.command('quiet')
 	expect(w.notified.length).toBe(1)
 	await w.set(T0 + 43 * MINUTE)
-	expect(w.label()).toBe('🍅 2 of 4 · 18/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 25/25m')
 	await w.set(T0 + 44 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
 	expect((w.store.timer as Timer).breakStart).toBe(T0 + 41 * MINUTE)
@@ -1005,7 +1052,7 @@ test('2 minutes 40 seconds away is no break, though the input after it counts on
 	})
 	start(w)
 	await w.set(T0 + 30 * MINUTE)
-	expect(w.label()).toBe('🍅 2 of 4 · 5/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 25/25m')
 	expect(w.toasts).toEqual([])
 	expect((w.store.tally as TallyEntry[]).map((entry) => entry.kind)).toEqual([
 		'pomodoro',
@@ -1078,7 +1125,7 @@ test('without ioreg, a break is a break from every session', async () => {
 
 	// 2 minutes without activity is no break, 3 are.
 	await w.advance(MINUTE)
-	expect(w.label()).toBe('🍅 2 of 4 · 1/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 25/25m')
 	await w.advance(MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
 })
@@ -1162,7 +1209,7 @@ test('watching the main agent work is no break', async () => {
 		await pomodoro.activity(true)
 	}
 	expect(w.shows.map((show) => show.label)).not.toContain('🍅 on a break')
-	expect(w.label()).toBe('🍅 2 of 4 · 5/25m')
+	expect(w.label()).toBe('🍅 1 of 4 · 25/25m')
 	expect(w.notified[0]).toStartWith('🍅 25 minutes without a break.')
 })
 
@@ -1281,15 +1328,15 @@ test("a prompt is the person's own input: it ends a break", async () => {
 	expect(timer.breakStart).toBeUndefined()
 })
 
-test('the count shows the pomodoro under way and the minutes into it', async () => {
+test("the count shows the pomodoro under way and the minutes into it, held once it's up until a break", async () => {
 	const w = world()
 	start(w)
 	await w.set(T0 + 12 * MINUTE)
 	expect(w.label()).toBe('🍅 1 of 4 · 12/25m')
-	// 52 minutes straight: two pomodoros, and 2 minutes into the third.
+	// 52 minutes straight: the first pomodoro is up, and no second starts without a break.
 	await w.set(T0 + 52 * MINUTE)
 	expect(w.shows.at(-1)).toEqual({
-		label: '🍅 3 of 4 · 2/25m',
+		label: '🍅 1 of 4 · 25/25m',
 		warning: '🍅 52m, time for a break',
 	})
 })
@@ -1375,7 +1422,7 @@ test('a closed lid for 15 minutes or more is a long break', async () => {
 		})
 		start(w)
 		await w.set(T0 + 30 * MINUTE)
-		expect(w.label()).toBe('🍅 2 of 4 · 5/25m')
+		expect(w.label()).toBe('🍅 1 of 4 · 25/25m')
 		w.sleep(closed * MINUTE)
 		await w.advance(MINUTE)
 		expect(w.label()).toBe(label)
@@ -1427,17 +1474,37 @@ test('no session open for 15 minutes or more is a long break', async () => {
 	}
 })
 
-test('the check-in at the end of a set asks for the long break', async () => {
-	const w = world()
+test('the check-in at the end of a set asks for the long break, and after 100 minutes straight for a short one', async () => {
+	// Rounds of 30 minutes, in use for 26 and away for 4.
+	const at = (minutes: number) => T0 + minutes * MINUTE
+	const w = world({
+		idle: inputs([
+			...steady(at(0), at(26)),
+			...[1, 2, 3].flatMap((round) =>
+				steady(at(30 * round) + 10_000, at(30 * round + 26)),
+			),
+		]),
+	})
 	const pomodoro = start(w)
-	await w.set(T0 + 26 * MINUTE)
+	await w.set(at(26))
 	expect(pomodoro.toolResult(true).checkIn).toEndWith(
 		'Remind them to take a break.',
 	)
-	// 100 minutes straight: four pomodoros.
-	await w.set(T0 + 101 * MINUTE)
+	// The fourth pomodoro of the set is up.
+	await w.set(at(116))
 	expect(pomodoro.toolResult(true).checkIn).toEndWith(
 		'Remind them to take a 15 to 30 minute break: their set of 4 pomodoros is done.',
+	)
+
+	// 100 minutes straight is one pomodoro, not a set: the alert and the check-in ask for a short break.
+	const straight = world()
+	const long = start(straight)
+	await straight.set(at(101))
+	expect(long.toolResult(true).checkIn).toEndWith(
+		'Remind them to take a break.',
+	)
+	expect(straight.notified.at(-1)).toBe(
+		'🍅 100 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
 	)
 })
 

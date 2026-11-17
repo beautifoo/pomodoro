@@ -285,7 +285,7 @@ test('/pomodoro quiet runs mid-turn, and the count shows it', async ($, on) => {
 	await clock.advance(20 * MIN)
 	expect([notified, chimes, status.filter(Boolean)]).toEqual([[], [], []])
 	expect(await pomodoro($, 'quiet')).toBe('Quiet is off.')
-	expect(labels.at(-1)).toBe('🍅 2 of 4 · 5/25m')
+	expect(labels.at(-1)).toBe('🍅 1 of 4 · 25/25m')
 	expect([notified.length, chimes.length]).toEqual([1, 1])
 	expect(status.at(-1)).toBe('🍅 30m, time for a break')
 })
@@ -368,9 +368,9 @@ test('the check-in rides the next tool result, once per pomodoro, and never wait
 	)
 	expect(await checked($)).toBe(false)
 
-	// Still no break 25 minutes later: a second check-in.
+	// Still no break 25 minutes later: no next pomodoro, so no second check-in.
 	await clock.advance(25 * MIN)
-	expect(await checked($)).toBe(true)
+	expect(await checked($)).toBe(false)
 
 	// A break of 3 minutes clears what is due, and steady input ends it.
 	leftAt = clock.now()
@@ -378,7 +378,7 @@ test('the check-in rides the next tool result, once per pomodoro, and never wait
 	expect(labels.at(-1)).toBe('🍅 on a break')
 	leftAt = Infinity
 	await clock.advance(MIN)
-	expect(labels.at(-1)).toBe('🍅 3 of 4 · 0/25m')
+	expect(labels.at(-1)).toBe('🍅 2 of 4 · 0/25m')
 	expect(await checked($)).toBe(false)
 })
 
@@ -416,7 +416,8 @@ test("a subagent's tool call, or one that was denied, doesn't take the check-in"
 test('a reload does not repeat the check-in the session was given', async ($, on) => {
 	// Overdue for a minute, and the check-in for this pomodoro was given before the mod reloaded (a /config change). The
 	// number under sentKey is also what 0.6.1 left there, so an update doesn't repeat a check-in.
-	const { clock } = world(on, () => 0, {
+	let leftAt = Infinity
+	const { clock } = world(on, (now) => (now >= leftAt ? now - leftAt : 0), {
 		timer: {
 			blockStart: T0 - 26 * MIN,
 			seenAt: T0 - 30_000,
@@ -436,10 +437,16 @@ test('a reload does not repeat the check-in the session was given', async ($, on
 	await clock.settle()
 	expect(await checked($)).toBe(false)
 
-	// The next pomodoro still gets its check-in, and it's kept for the next reload.
+	// None while there's no break; after one, the next pomodoro gets its check-in, and it's kept for the next reload.
 	await clock.advance(25 * MIN)
+	expect(await checked($)).toBe(false)
+	leftAt = clock.now()
+	await clock.advance(4 * MIN)
+	leftAt = Infinity
+	await clock.advance(26 * MIN)
 	expect(await checked($)).toBe(true)
-	expect(sent).toEqual([T0 + 24 * MIN])
+	// Back at the first look after the break, 10 seconds into its minute.
+	expect(sent).toEqual([T0 + 54 * MIN + 10_000])
 })
 
 // A removed setting reaches the plugin as it was in settings.json: unchecked, and of any type.
@@ -505,12 +512,15 @@ test("the check-in's summary is logged from any reply in its turn, and /pomodoro
 		'Pomodoro: on the goal.\nTake a break.',
 	])
 	expect(await listed($)).toMatch(
-		/^Today: 🍅 1 pomodoro \(yesterday 0\), 0 long breaks, 0 breaks skipped, longest 26m\n\d\d:\d\d {2}Pomodoro: on the goal\.\n {7}Take a break\.$/,
+		/^Today: 🍅 1 pomodoro \(yesterday 0\), 0 long breaks, 0 late breaks, longest 26m\n\d\d:\d\d {2}Pomodoro: on the goal\.\n {7}Take a break\.$/,
 	)
 })
 
 test("a turn that ends without the summary, answered or cut short, logs nothing, and the next turn's isn't taken for it", async ($, on) => {
-	const { clock, store, respond } = world(on, () => 0)
+	let leftAt = Infinity
+	const { clock, store, respond } = world(on, (now) =>
+		now >= leftAt ? now - leftAt : 0,
+	)
 	await start($)
 	for (const reason of ['answer', 'aborted'] as const) {
 		await clock.advance(26 * MIN)
@@ -518,6 +528,10 @@ test("a turn that ends without the summary, answered or cut short, logs nothing,
 		await respond($, 'Done.')
 		await endTurn($, reason)
 		await respond($, 'Pomodoro: the next turn.')
+		// A break, so the next pomodoro has a check-in of its own.
+		leftAt = clock.now()
+		await clock.advance(4 * MIN)
+		leftAt = Infinity
 	}
 	expect(store.checkIns).toBe(undefined)
 })

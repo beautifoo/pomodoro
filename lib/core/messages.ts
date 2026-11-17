@@ -6,15 +6,15 @@ export type Messages = {
 	// The /pomodoro command's description, and its usage line.
 	description: string
 	usage: string
-	// /pomodoro today's first line: the day's pomodoros, yesterday's, the long breaks, the breaks skipped (a pomodoro
-	// followed by another with no break) and the longest stretch without a break in minutes, after `mark` (the 🍅 or
-	// nothing); or that no pomodoro has counted today.
+	// /pomodoro today's first line: the day's pomodoros, yesterday's, the long breaks, the late breaks (5 minutes or more
+	// after a pomodoro was up) and the longest stretch without a break in minutes, after `mark` (the 🍅 or nothing); or
+	// that no pomodoro has counted today.
 	today: (day: {
 		mark: string
 		pomodoros: number
 		yesterday: number
 		longBreaks: number
-		skipped: number
+		late: number
 		longest: number
 	}) => string
 	noPomodoros: string
@@ -63,8 +63,8 @@ const en: Messages = {
 	description:
 		"Shows today's pomodoros and check-ins in this repository, or turns quiet on or off to hold the alerts during a meeting.",
 	usage: 'Usage: /pomodoro [today|quiet]',
-	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
-		`Today: ${mark}${plural('en', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (yesterday ${yesterday}), ${plural('en', longBreaks, { one: 'long break', other: 'long breaks' })}, ${plural('en', skipped, { one: 'break', other: 'breaks' })} skipped, longest ${longest}m`,
+	today: ({ mark, pomodoros, yesterday, longBreaks, late, longest }) =>
+		`Today: ${mark}${plural('en', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (yesterday ${yesterday}), ${plural('en', longBreaks, { one: 'long break', other: 'long breaks' })}, ${plural('en', late, { one: 'late break', other: 'late breaks' })}, longest ${longest}m`,
 	noPomodoros: 'Today: no pomodoros yet.',
 	onABreak: 'on a break',
 	count: (position, minutes) => `${position} of 4 · ${minutes}/25m`,
@@ -106,8 +106,8 @@ const it: Messages = {
 	description:
 		'Mostra i pomodori e i check-in di oggi in questo repository, o attiva e disattiva il silenzio per sospendere gli avvisi durante una riunione.',
 	usage: 'Uso: /pomodoro [today|quiet]',
-	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
-		`Oggi: ${mark}${plural('it', pomodoros, { one: 'pomodoro', other: 'pomodori' })} (ieri ${yesterday}), ${plural('it', longBreaks, { one: 'pausa lunga', other: 'pause lunghe' })}, ${plural('it', skipped, { one: 'pausa saltata', other: 'pause saltate' })}, massimo senza pausa ${longest} min`,
+	today: ({ mark, pomodoros, yesterday, longBreaks, late, longest }) =>
+		`Oggi: ${mark}${plural('it', pomodoros, { one: 'pomodoro', other: 'pomodori' })} (ieri ${yesterday}), ${plural('it', longBreaks, { one: 'pausa lunga', other: 'pause lunghe' })}, ${plural('it', late, { one: 'pausa in ritardo', other: 'pause in ritardo' })}, massimo senza pausa ${longest} min`,
 	noPomodoros: 'Oggi: ancora nessun pomodoro.',
 	onABreak: 'in pausa',
 	count: (position, minutes) => `${position} di 4 · ${minutes}/25 min`,
@@ -150,8 +150,8 @@ const de: Messages = {
 	description:
 		'Zeigt die heutigen Pomodoros und Check-ins in diesem Repository oder schaltet die Benachrichtigungen während eines Meetings stumm und wieder an.',
 	usage: 'Verwendung: /pomodoro [today|quiet]',
-	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
-		`Heute: ${mark}${plural('de', pomodoros, { one: 'Pomodoro', other: 'Pomodoros' })} (gestern ${yesterday}), ${plural('de', longBreaks, { one: 'lange Pause', other: 'lange Pausen' })}, ${plural('de', skipped, { one: 'Pause', other: 'Pausen' })} ausgelassen, am längsten ohne Pause ${longest} min`,
+	today: ({ mark, pomodoros, yesterday, longBreaks, late, longest }) =>
+		`Heute: ${mark}${plural('de', pomodoros, { one: 'Pomodoro', other: 'Pomodoros' })} (gestern ${yesterday}), ${plural('de', longBreaks, { one: 'lange Pause', other: 'lange Pausen' })}, ${plural('de', late, { one: 'späte Pause', other: 'späte Pausen' })}, am längsten ohne Pause ${longest} min`,
 	noPomodoros: 'Heute: noch keine Pomodoros.',
 	onABreak: 'in der Pause',
 	count: (position, minutes) => `${position} von 4 · ${minutes}/25 min`,
@@ -194,8 +194,8 @@ const fr: Messages = {
 	description:
 		'Affiche les pomodoros et check-ins du jour dans ce dépôt, ou active et désactive le mode silencieux pour suspendre les alertes pendant une réunion.',
 	usage: 'Utilisation : /pomodoro [today|quiet]',
-	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
-		`Aujourd'hui : ${mark}${plural('fr', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (hier ${yesterday}), ${plural('fr', longBreaks, { one: 'longue pause', other: 'longues pauses' })}, ${plural('fr', skipped, { one: 'pause sautée', other: 'pauses sautées' })}, record sans pause ${longest} min`,
+	today: ({ mark, pomodoros, yesterday, longBreaks, late, longest }) =>
+		`Aujourd'hui : ${mark}${plural('fr', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (hier ${yesterday}), ${plural('fr', longBreaks, { one: 'longue pause', other: 'longues pauses' })}, ${plural('fr', late, { one: 'pause tardive', other: 'pauses tardives' })}, record sans pause ${longest} min`,
 	noPomodoros: "Aujourd'hui : pas encore de pomodoro.",
 	onABreak: 'en pause',
 	count: (position, minutes) => `${position} sur 4 · ${minutes}/25 min`,
@@ -238,8 +238,8 @@ const es: Messages = {
 	description:
 		'Muestra los pomodoros y check-ins de hoy en este repositorio, o activa y desactiva el modo silencio para pausar las alertas durante una reunión.',
 	usage: 'Uso: /pomodoro [today|quiet]',
-	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
-		`Hoy: ${mark}${plural('es', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (ayer ${yesterday}), ${plural('es', longBreaks, { one: 'descanso largo', other: 'descansos largos' })}, ${plural('es', skipped, { one: 'descanso saltado', other: 'descansos saltados' })}, máximo sin descanso ${longest} min`,
+	today: ({ mark, pomodoros, yesterday, longBreaks, late, longest }) =>
+		`Hoy: ${mark}${plural('es', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (ayer ${yesterday}), ${plural('es', longBreaks, { one: 'descanso largo', other: 'descansos largos' })}, ${plural('es', late, { one: 'descanso tardío', other: 'descansos tardíos' })}, máximo sin descanso ${longest} min`,
 	noPomodoros: 'Hoy: aún no hay pomodoros.',
 	onABreak: 'en descanso',
 	count: (position, minutes) => `${position} de 4 · ${minutes}/25 min`,
@@ -284,8 +284,8 @@ const pt: Messages = {
 	description:
 		'Mostra os pomodoros e check-ins de hoje neste repositório, ou liga e desliga o modo silêncio para pausar os alertas durante uma reunião.',
 	usage: 'Uso: /pomodoro [today|quiet]',
-	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
-		`Hoje: ${mark}${plural('pt-PT', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (ontem ${yesterday}), ${plural('pt-PT', longBreaks, { one: 'pausa longa', other: 'pausas longas' })}, ${plural('pt-PT', skipped, { one: 'pausa pulada', other: 'pausas puladas' })}, máximo sem pausa ${longest} min`,
+	today: ({ mark, pomodoros, yesterday, longBreaks, late, longest }) =>
+		`Hoje: ${mark}${plural('pt-PT', pomodoros, { one: 'pomodoro', other: 'pomodoros' })} (ontem ${yesterday}), ${plural('pt-PT', longBreaks, { one: 'pausa longa', other: 'pausas longas' })}, ${plural('pt-PT', late, { one: 'pausa tardia', other: 'pausas tardias' })}, máximo sem pausa ${longest} min`,
 	noPomodoros: 'Hoje: nenhum pomodoro ainda.',
 	onABreak: 'em pausa',
 	count: (position, minutes) => `${position} de 4 · ${minutes}/25 min`,
@@ -337,8 +337,8 @@ const ru: Messages = {
 	description:
 		'Показывает сегодняшние помидоры и сводки в этом репозитории или включает и выключает тихий режим, чтобы уведомления не мешали во время встречи.',
 	usage: 'Использование: /pomodoro [today|quiet]',
-	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
-		`Сегодня: ${mark}${plural('ru', pomodoros, { one: 'помидор', few: 'помидора', many: 'помидоров', other: 'помидора' })} (вчера ${yesterday}), ${plural('ru', longBreaks, { one: 'длинный перерыв', few: 'длинных перерыва', many: 'длинных перерывов', other: 'длинного перерыва' })}, ${plural('ru', skipped, { one: 'пропущенный перерыв', few: 'пропущенных перерыва', many: 'пропущенных перерывов', other: 'пропущенного перерыва' })}, максимум без перерыва ${longest} мин`,
+	today: ({ mark, pomodoros, yesterday, longBreaks, late, longest }) =>
+		`Сегодня: ${mark}${plural('ru', pomodoros, { one: 'помидор', few: 'помидора', many: 'помидоров', other: 'помидора' })} (вчера ${yesterday}), ${plural('ru', longBreaks, { one: 'длинный перерыв', few: 'длинных перерыва', many: 'длинных перерывов', other: 'длинного перерыва' })}, ${plural('ru', late, { one: 'поздний перерыв', few: 'поздних перерыва', many: 'поздних перерывов', other: 'позднего перерыва' })}, максимум без перерыва ${longest} мин`,
 	noPomodoros: 'Сегодня: помидоров пока нет.',
 	onABreak: 'на перерыве',
 	count: (position, minutes) => `${position} из 4 · ${minutes}/25 мин`,
@@ -381,8 +381,8 @@ const ru: Messages = {
 const zh: Messages = {
 	description: '显示此仓库今天的番茄钟和小结，或开关静音，在会议期间暂停提醒。',
 	usage: '用法：/pomodoro [today|quiet]',
-	today: ({ mark, pomodoros, yesterday, longBreaks, skipped, longest }) =>
-		`今天：${mark}${pomodoros}个番茄钟（昨天${yesterday}个），${longBreaks}次长休息，跳过${skipped}次休息，最长连续${longest}分钟`,
+	today: ({ mark, pomodoros, yesterday, longBreaks, late, longest }) =>
+		`今天：${mark}${pomodoros}个番茄钟（昨天${yesterday}个），${longBreaks}次长休息，推迟${late}次休息，最长连续${longest}分钟`,
 	noPomodoros: '今天：还没有番茄钟。',
 	onABreak: '休息中',
 	count: (position, minutes) => `${position}/4 · ${minutes}/25分钟`,

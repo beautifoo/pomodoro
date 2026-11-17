@@ -27,7 +27,7 @@ const DAY = {
 	pomodoros: 3,
 	yesterday: 2,
 	longBreaks: 1,
-	skipped: 2,
+	late: 2,
 	longest: 75,
 }
 
@@ -78,7 +78,7 @@ test('English reads as it always has, and the time away is in hours from 2 hours
 	const { en } = messages
 	expect(en.count(3, 12)).toBe('3 of 4 · 12/25m')
 	expect(en.today(DAY)).toBe(
-		'Today: 🍅 3 pomodoros (yesterday 2), 1 long break, 2 breaks skipped, longest 75m',
+		'Today: 🍅 3 pomodoros (yesterday 2), 1 long break, 2 late breaks, longest 75m',
 	)
 	expect(en.back(119, 2)).toBe('Back after 119m · pomodoro 2 of 4')
 	expect(en.backLong(840)).toBe('Back after 14h · new set, pomodoro 1 of 4')
