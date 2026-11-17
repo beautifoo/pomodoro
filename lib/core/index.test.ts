@@ -8,13 +8,14 @@ import {
 	DEFAULTS,
 	type Host,
 	LOCK,
+	looked,
 	MINUTE,
 	type Settings,
 	type Stored,
 	settingsFrom,
-	step,
 	type TallyEntry,
 	type Timer,
+	tick,
 } from './index'
 import { type Language, messages } from './messages'
 
@@ -1097,31 +1098,33 @@ test('2 minutes 40 seconds away is no break, though the input after it counts on
 // Another session's input can end this one's break before its own looks see the return: what it read at the last
 // return is never taken for this one.
 test('a break forgets when the person came back from the last one', () => {
-	type State = Parameters<typeof step>[0]
-	type Event = Parameters<typeof step>[1]
-	let state: State = { lastActivity: 0, looks: [], awaitingSummary: false }
-	const feed = (...events: Event[]) => {
-		for (const event of events) state = step(state, event, DEFAULTS, 'en').state
+	let state: Parameters<typeof tick>[0] = {
+		lastActivity: 0,
+		looks: [],
+		awaitingSummary: false,
+	}
+	// Looks that each see input at `seconds` in, and ticks at `times`.
+	const looks = (...seconds: number[]) => {
+		for (const s of seconds) state = looked(state, T0 + s * 1_000, 0)
+	}
+	const ticks = (...times: number[]) => {
+		for (const now of times)
+			state = tick(
+				state,
+				{ now, timer: {}, repo: null, isLocked: false, awakeAt: 0 },
+				DEFAULTS,
+				'en',
+			).state
 	}
 	// Input that counts to 30 seconds in, then a break.
-	const look = (at: number) => ({ type: 'look', now: at, idleMs: 0 }) as const
-	const tick = (at: number) =>
-		({
-			type: 'tick',
-			now: at,
-			timer: {},
-			repo: null,
-			isLocked: false,
-			awakeAt: 0,
-		}) as const
-	feed(...[0, 10, 20, 30].map((s) => look(T0 + s * 1_000)))
-	feed(tick(T0 + 3.5 * MINUTE))
+	looks(0, 10, 20, 30)
+	ticks(T0 + 3.5 * MINUTE)
 	expect(state.backAt).toBeUndefined()
 	// Back 4 minutes in, from the first of three looks that saw input.
-	feed(...[240, 250, 260].map((s) => look(T0 + s * 1_000)))
+	looks(240, 250, 260)
 	expect(state.backAt).toBe(T0 + 4 * MINUTE)
 	// Away again: the next break forgets that return.
-	feed(tick(T0 + 4.5 * MINUTE), tick(T0 + 7.5 * MINUTE))
+	ticks(T0 + 4.5 * MINUTE, T0 + 7.5 * MINUTE)
 	expect(state.backAt).toBeUndefined()
 })
 
@@ -1580,7 +1583,7 @@ test('the return is never before the break began, and a break from 0 is a long o
 		[T0 - MINUTE, T0],
 		[undefined, 0],
 	] as const) {
-		const { effects } = step(
+		const { effects } = tick(
 			{
 				lastActivity: 0,
 				looks: [],
@@ -1589,7 +1592,6 @@ test('the return is never before the break began, and a break from 0 is a long o
 				backAt,
 			},
 			{
-				type: 'tick',
 				now,
 				timer: {
 					blockStart: T0 - 30 * MINUTE,

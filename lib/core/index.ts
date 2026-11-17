@@ -5,7 +5,8 @@ export type { Timer } from './timer'
 
 // The work-and-break rhythm the pomodoro plugins share. Each agent creates an instance for each session
 // (createInstance), with a host that does its I/O, and passes it the session's events; whatever only one agent does
-// stays in that agent's code (docs/adr/0001). Inside, step() is pure: it says what to do, and the instance does it.
+// stays in that agent's code (docs/adr/0001). Inside, the rhythm's rules are pure functions: each says what to do, and
+// the instance does it.
 
 // The agent's summary at a check-in, kept for /pomodoro today.
 export type CheckIn = { at: number; repo: string | null; text: string }
@@ -67,27 +68,17 @@ type State = {
 	headsUpKey?: number
 }
 
-type Event =
-	// The main loop's prompt, reply, or tool call as it starts or ends; the person's own for a prompt.
-	| { type: 'activity'; now: number; byPerson: boolean }
-	// A look at the system's input idle time, which ioreg reads.
-	| { type: 'look'; now: number; idleMs: number }
-	// The minute's tick, with the stored timer, the session's repository, whether the screen is locked, and the
-	// instance's last tick or look before it (0: none), when the Mac was last awake as far as this session knows.
-	| {
-			type: 'tick'
-			now: number
-			timer: Timer
-			repo: string | null
-			isLocked: boolean
-			awakeAt: number
-	  }
-	| { type: 'toolResult'; isMain: boolean }
-	// A finished response of the main loop, and the end of its turn (in Pi, the run).
-	| { type: 'reply'; text: string }
-	| { type: 'turnEnded' }
+// The minute's tick, with the stored timer, the session's repository, whether the screen is locked, and the instance's
+// last tick or look before it (0: none), when the Mac was last awake as far as this session knows.
+interface Tick {
+	now: number
+	timer: Timer
+	repo: string | null
+	isLocked: boolean
+	awakeAt: number
+}
 
-// In the order to carry them out.
+// What a tick says to do, in the order to carry it out.
 type Effect =
 	// Tick again this much later.
 	| { type: 'wake'; afterMs: number }
@@ -98,12 +89,6 @@ type Effect =
 	| { type: 'alert'; text: string; mark: string; sound: boolean }
 	// Back from a break: a toast, with no banner and no chime.
 	| { type: 'toast'; text: string }
-	// Add `text` to this tool result.
-	| { type: 'checkIn'; key: number; text: string }
-	// Tell the agent `text` with this tool result, where the person doesn't see it.
-	| { type: 'headsUp'; text: string }
-	// Add the summary to the log.
-	| { type: 'log'; text: string }
 	// Add these to the tally.
 	| { type: 'tally'; entries: TallyEntry[] }
 
@@ -239,20 +224,13 @@ export function createInstance(
 	const isTickBehind = (now: number) =>
 		cancelClock !== undefined && !isStopped && now - lastTickAt >= SHORT_BREAK
 
-	// Moves the rhythm on by one event, and returns what to carry out, in order.
-	function feed(event: Event) {
-		const next = step(state, event, settings, language)
-		state = next.state
-		return next.effects
-	}
-
 	// Where ioreg gives nothing (not macOS) there's no look, and the session's activity stands in. After a sleep the tick,
 	// which takes its own look, finds the break from the input before it, before looks of the input after it can count.
 	async function look() {
 		const now = await host.now()
 		if (isTickBehind(now)) return runTick()
 		const idleMs = ioregIdleMs(await host.run(IOREG, 5_000).catch(() => ''))
-		if (idleMs !== undefined) feed({ type: 'look', now, idleMs })
+		if (idleMs !== undefined) state = looked(state, now, idleMs)
 	}
 
 	// The agent's alert, then the chime.
@@ -278,14 +256,20 @@ export function createInstance(
 				'"IOConsoleLocked" = Yes',
 			)
 		const now = await host.now()
-		for (const effect of feed({
-			type: 'tick',
-			now,
-			timer: (await host.load('timer')) ?? {},
-			repo: await host.repo().catch(() => null),
-			isLocked,
-			awakeAt,
-		})) {
+		const next = tick(
+			state,
+			{
+				now,
+				timer: (await host.load('timer')) ?? {},
+				repo: await host.repo().catch(() => null),
+				isLocked,
+				awakeAt,
+			},
+			settings,
+			language,
+		)
+		state = next.state
+		for (const effect of next.effects) {
 			// A tick still under way when the instance stopped carries out nothing more: its session is gone.
 			if (isStopped) return
 			// Each wake aims at the moment the stretch without input becomes a break, so the newest replaces the last.
@@ -303,6 +287,7 @@ export function createInstance(
 			else if (effect.type === 'toast') host.toast(effect.text)
 			else if (effect.type === 'tally')
 				await tally(now, effect.entries).catch(() => {})
+			else effect satisfies never
 		}
 	}
 
@@ -359,26 +344,31 @@ export function createInstance(
 			// After a sleep the tick comes first, so a check-in due before it isn't sent.
 			if (isTickBehind(now)) await runTick().catch(() => {})
 			// A subagent's work isn't the person being there.
-			if (isMain) feed({ type: 'activity', now, byPerson })
+			if (isMain) state = active(state, now, byPerson)
 		},
 		async toolResult(isMain) {
 			// After a sleep the tick comes first, so a check-in due before it isn't sent.
 			if (isTickBehind(await host.now())) await runTick().catch(() => {})
-			const notes: Awaited<ReturnType<Instance['toolResult']>> = {}
-			for (const effect of feed({ type: 'toolResult', isMain }))
-				if (effect.type === 'checkIn') {
-					host.keep(effect.key)
-					notes.checkIn = effect.text
-					notes.notice = `${tomato(settings)}${messages[language].notice}`
-				} else if (effect.type === 'headsUp') notes.headsUp = effect.text
-			return notes
+			const next = noted(state, isMain)
+			state = next.state
+			const { checkIn, headsUp } = next
+			if (checkIn !== undefined) host.keep(checkIn.key)
+			return {
+				...(checkIn !== undefined && {
+					checkIn: checkIn.text,
+					notice: `${tomato(settings)}${messages[language].notice}`,
+				}),
+				...(headsUp !== undefined && { headsUp }),
+			}
 		},
 		async reply(text) {
-			for (const effect of feed({ type: 'reply', text }))
-				if (effect.type === 'log') await log(effect.text).catch(() => {})
+			const next = summed(state, text)
+			state = next.state
+			if (next.log !== undefined) await log(next.log).catch(() => {})
 		},
+		// No summary by the turn's end: the agent chose not to give one, or the turn was cut short.
 		turnEnded() {
-			feed({ type: 'turnEnded' })
+			state = { ...state, awaitingSummary: false }
 		},
 		async command(args) {
 			if (args.trim() === 'quiet') return toggleQuiet()
@@ -417,45 +407,18 @@ const HEADS_UP =
 const tomato = (settings: Settings, word = '') =>
 	settings.emoji ? '🍅 ' : word
 
-// Exported for its tests, which read the state an instance keeps to itself.
-export function step(
-	state: State,
-	event: Event,
-	settings: Settings,
-	language: Language,
-): { state: State; effects: Effect[] } {
-	switch (event.type) {
-		case 'activity': {
-			const { now, byPerson } = event
-			const active = { ...state, lastActivity: now }
-			// The person's prompt counts at once as input. Without the looks, the activity stands in for input already.
-			return {
-				state:
-					byPerson && state.lastInputThatCounts !== undefined
-						? inputCounts(active, now, now, now)
-						: active,
-				effects: [],
-			}
-		}
-		case 'look':
-			return {
-				state: looked(state, event.now, event.idleMs),
-				effects: [],
-			}
-		case 'tick':
-			return tick(state, event, settings, language)
-		case 'toolResult':
-			return toolResult(state, event.isMain)
-		case 'reply':
-			return reply(state, event.text)
-		// No summary by the turn's end: the agent chose not to give one, or the turn was cut short.
-		case 'turnEnded':
-			return { state: { ...state, awaitingSummary: false }, effects: [] }
-	}
+// The main loop's prompt, reply, or tool call as it starts or ends; the person's own for a prompt, which counts at once
+// as input. Without the looks, the activity stands in for input already.
+function active(state: State, now: number, byPerson: boolean): State {
+	const next = { ...state, lastActivity: now }
+	return byPerson && state.lastInputThatCounts !== undefined
+		? inputCounts(next, now, now, now)
+		: next
 }
 
-// A look puts the latest input `idleMs` before `now`, and saw input when that's after the look before.
-function looked(state: State, now: number, idleMs: number): State {
+// A look puts the latest input `idleMs` before `now`, and saw input when that's after the look before. Exported, as
+// tick is, for its tests, which read the state an instance keeps to itself.
+export function looked(state: State, now: number, idleMs: number): State {
 	const latest = now - idleMs
 	// The first look counts at once: the input before the instance started, so a reload doesn't end a break.
 	if (state.lookedAt === undefined || state.lastInputThatCounts === undefined)
@@ -495,15 +458,9 @@ function inputCounts(
 	}
 }
 
-function tick(
+export function tick(
 	previous: State,
-	{
-		now,
-		timer: stored,
-		repo: here,
-		isLocked,
-		awakeAt,
-	}: Extract<Event, { type: 'tick' }>,
+	{ now, timer: stored, repo: here, isLocked, awakeAt }: Tick,
 	settings: Settings,
 	language: Language,
 ): { state: State; effects: Effect[] } {
@@ -701,36 +658,34 @@ const pomodoros = (
 // The check-in and the heads-up ride a tool result of the main loop, each once per pomodoro. Each counts as sent from
 // here, so two tool results at once can't both carry it. A check-in's key only grows, and one kept by 0.7.0, which
 // gave one every 25 minutes, can be later in the same stretch: none is given again for it.
-function toolResult(
+function noted(
 	state: State,
 	isMain: boolean,
-): { state: State; effects: Effect[] } {
-	if (!isMain) return { state, effects: [] }
+): { state: State; checkIn?: { key: number; text: string }; headsUp?: string } {
+	if (!isMain) return { state }
 	const { due, headsUp } = state
-	let next = state
-	const effects: Effect[] = []
-	if (due !== undefined && due.key > (state.sentKey ?? 0)) {
-		next = { ...next, sentKey: due.key, awaitingSummary: true }
-		effects.push({ type: 'checkIn', ...due })
+	const checkIn =
+		due !== undefined && due.key > (state.sentKey ?? 0) ? due : undefined
+	const isHeadsUp = headsUp !== undefined && headsUp !== state.headsUpKey
+	return {
+		state: {
+			...state,
+			...(checkIn !== undefined && {
+				sentKey: checkIn.key,
+				awaitingSummary: true,
+			}),
+			...(isHeadsUp && { headsUpKey: headsUp }),
+		},
+		checkIn,
+		headsUp: isHeadsUp ? HEADS_UP : undefined,
 	}
-	if (headsUp !== undefined && headsUp !== state.headsUpKey) {
-		next = { ...next, headsUpKey: headsUp }
-		effects.push({ type: 'headsUp', text: HEADS_UP })
-	}
-	return { state: next, effects }
 }
 
 // The summary can come in any response after the check-in, mid-task too, until the turn ends.
-function reply(
-	state: State,
-	text: string,
-): { state: State; effects: Effect[] } {
+function summed(state: State, text: string): { state: State; log?: string } {
 	const found = state.awaitingSummary ? summary(text) : undefined
-	if (found === undefined) return { state, effects: [] }
-	return {
-		state: { ...state, awaitingSummary: false },
-		effects: [{ type: 'log', text: found }],
-	}
+	if (found === undefined) return { state }
+	return { state: { ...state, awaitingSummary: false }, log: found }
 }
 
 // The summary the note asks for: the first paragraph of a reply that starts with "Pomodoro:", with markdown around the
