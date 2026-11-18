@@ -4,9 +4,9 @@
 // Shared by every open session through the agent's store: one pomodoro per person, not per session. `blockStart` is when
 // the stretch of work since the last break began, `done` the pomodoros of the set before it, `lastInput` the person's
 // own (while quiet, the person is there until a tick sees the screen locked), `agentAt` the main agent's last activity,
-// `breakStart` when the break under way began, and `quiet` whether /pomodoro quiet is on. `repo` is the repository the
-// tally credits, that of the ticking session with the latest activity, at `repoAt`; `counted` the pomodoros of this
-// stretch already in the tally.
+// `breakStart` when the break under way began, `quiet` whether /pomodoro quiet is on, since `quietAt` (0.8.0 kept no
+// start). `repo` is the repository the tally credits, that of the ticking session with the latest activity, at
+// `repoAt`; `counted` the pomodoros of this stretch already in the tally.
 export interface Timer {
 	blockStart?: number
 	done?: number
@@ -16,6 +16,7 @@ export interface Timer {
 	agentAt?: number
 	breakStart?: number
 	quiet?: boolean
+	quietAt?: number
 	repo?: string | null
 	repoAt?: number
 	counted?: number
@@ -45,6 +46,7 @@ export const onBreak = (
 	agentAt,
 	breakStart: timer.breakStart ?? lastInput,
 	quiet: undefined,
+	quietAt: undefined,
 	repo: timer.repo ?? null,
 	repoAt: timer.repoAt,
 	counted: timer.counted ?? 0,
@@ -82,6 +84,7 @@ export const working = (
 	agentAt,
 	breakStart: undefined,
 	quiet,
+	quietAt: quiet ? timer.quietAt : undefined,
 	repo: timer.repo ?? null,
 	repoAt: timer.repoAt,
 	counted,
@@ -100,7 +103,7 @@ export const credited = (
 		: timer
 
 // /pomodoro quiet, on or off. Off, it forgets the last alert, so a break due alerts at once, even within 5 minutes of it.
-export const quietToggled = (timer: Timer): Timer =>
+export const quietToggled = (timer: Timer, now: number): Timer =>
 	timer.quiet
-		? { ...timer, quiet: false, alertedAt: undefined }
-		: { ...timer, quiet: true }
+		? { ...timer, quiet: false, quietAt: undefined, alertedAt: undefined }
+		: { ...timer, quiet: true, quietAt: now }

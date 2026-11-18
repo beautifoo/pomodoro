@@ -305,7 +305,10 @@ export function createInstance(
 	// turned on.
 	async function toggleQuiet() {
 		if (isTickBehind(await host.now())) await runTick().catch(() => {})
-		const timer = quietToggled((await host.load('timer')) ?? {})
+		const timer = quietToggled(
+			(await host.load('timer')) ?? {},
+			await host.now(),
+		)
 		await host.save('timer', timer)
 		// Only where the clock runs, which is where the count shows.
 		if (cancelClock !== undefined && !isStopped) await runTick().catch(() => {})
@@ -484,7 +487,10 @@ export function tick(
 	const isGap =
 		timer.seenAt === undefined ||
 		now - Math.max(timer.seenAt, awakeAt) >= SHORT_BREAK
-	const isQuiet = timer.quiet === true && !isGap
+	// Quiet lasts 4 pomodoros from when it began, so one forgotten after a meeting ends by itself; 0.8.0 kept no start,
+	// so its quiet counts from the stretch's.
+	const quietUntil = (timer.quietAt ?? timer.blockStart ?? now) + SET * POMODORO
+	const isQuiet = timer.quiet === true && !isGap && now < quietUntil
 	// The person's last input that counts, from the looks at ioreg, and the main agent's last activity; without the
 	// looks, both are the activity. Each is the latest any session has seen, so an idle session can't end the pomodoro
 	// another one is working in. While quiet the person is there until the screen locks: sitting still in a call is no

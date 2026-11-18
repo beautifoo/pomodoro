@@ -146,7 +146,7 @@ test('English reads as it always has, and the time away is in hours from 2 hours
 	expect(en.backLong(840)).toBe('Back after 14h · new set, pomodoro 1 of 4')
 	expect(en.backLong(150)).toBe('Back after 2h · new set, pomodoro 1 of 4')
 	expect(en.quietOn).toBe(
-		'Quiet is on: no alerts or check-ins until you run /pomodoro quiet again, or lock the screen or close the lid for 3 minutes. The count goes on.',
+		'Quiet is on: no alerts or check-ins for 100 minutes, or until you run /pomodoro quiet again, or lock the screen or close the lid for 3 minutes. The count goes on.',
 	)
 	for (const language of Object.keys(messages) as Language[]) {
 		expect(messages[language].backLong(840)).toContain('14')

@@ -15,6 +15,7 @@ const fields = {
 	agentAt: fc.nat(),
 	breakStart: fc.nat(),
 	quiet: fc.boolean(),
+	quietAt: fc.nat(),
 	repo: fc.option(fc.string(), { nil: null }),
 	repoAt: fc.nat(),
 	counted: fc.nat({ max: 8 }),
@@ -43,6 +44,7 @@ const FIELDS = [
 	'done',
 	'lastInput',
 	'quiet',
+	'quietAt',
 	'repo',
 	'repoAt',
 	'seenAt',
@@ -72,6 +74,7 @@ test("a first break, with nothing stored, begins at the person's last input and 
 		agentAt: T0 + MINUTE,
 		breakStart: T0,
 		quiet: undefined,
+		quietAt: undefined,
 		repo: null,
 		repoAt: undefined,
 		counted: 0,
@@ -241,16 +244,16 @@ test('crediting twice is the same as once', () => {
 	)
 })
 
-test('turning quiet off forgets the last alert', () => {
-	expect(quietToggled({ quiet: true, alertedAt: T0 })).toEqual({
-		quiet: false,
-		alertedAt: undefined,
-	})
+test('turning quiet off forgets the last alert and when it began', () => {
+	expect(
+		quietToggled({ quiet: true, quietAt: T0, alertedAt: T0 }, T0 + MINUTE),
+	).toEqual({ quiet: false, quietAt: undefined, alertedAt: undefined })
 })
 
-test('turning quiet on keeps the last alert', () => {
-	expect(quietToggled({ alertedAt: T0 })).toEqual({
+test('turning quiet on keeps the last alert and notes when', () => {
+	expect(quietToggled({ alertedAt: T0 }, T0 + MINUTE)).toEqual({
 		quiet: true,
+		quietAt: T0 + MINUTE,
 		alertedAt: T0,
 	})
 })
@@ -261,44 +264,76 @@ const notQuiet = stored.filter((timer) => timer.quiet !== true)
 
 test('toggling quiet twice gives back the same quiet', () => {
 	fc.assert(
-		fc.property(stored, (timer) => {
-			expect(quietToggled(quietToggled(timer)).quiet).toBe(timer.quiet === true)
+		fc.property(stored, fc.nat(), (timer, now) => {
+			expect(quietToggled(quietToggled(timer, now), now).quiet).toBe(
+				timer.quiet === true,
+			)
 		}),
 	)
 })
 
 test('whatever the timer, turning quiet off forgets the last alert', () => {
 	fc.assert(
-		fc.property(quiet, (timer) => {
-			expect(quietToggled(timer).alertedAt).toBeUndefined()
+		fc.property(quiet, fc.nat(), (timer, now) => {
+			expect(quietToggled(timer, now).alertedAt).toBeUndefined()
+		}),
+	)
+})
+
+test('whatever the timer, turning quiet off forgets when it began', () => {
+	fc.assert(
+		fc.property(quiet, fc.nat(), (timer, now) => {
+			expect(quietToggled(timer, now).quietAt).toBeUndefined()
 		}),
 	)
 })
 
 test('whatever the timer, turning quiet on keeps the last alert', () => {
 	fc.assert(
-		fc.property(notQuiet, (timer) => {
-			expect(quietToggled(timer).alertedAt).toBe(timer.alertedAt)
+		fc.property(notQuiet, fc.nat(), (timer, now) => {
+			expect(quietToggled(timer, now).alertedAt).toBe(timer.alertedAt)
 		}),
 	)
 })
 
 test('whatever the timer, turning quiet on sets it', () => {
 	fc.assert(
-		fc.property(notQuiet, (timer) => {
-			expect(quietToggled(timer).quiet).toBe(true)
+		fc.property(notQuiet, fc.nat(), (timer, now) => {
+			expect(quietToggled(timer, now).quiet).toBe(true)
 		}),
 	)
 })
 
-test('toggling quiet keeps everything but quiet and the last alert', () => {
+test('whatever the timer, turning quiet on notes when', () => {
 	fc.assert(
-		fc.property(stored, (timer) => {
-			expect({
-				...quietToggled(timer),
+		fc.property(notQuiet, fc.nat(), (timer, now) => {
+			expect(quietToggled(timer, now).quietAt).toBe(now)
+		}),
+	)
+})
+
+test('toggling quiet keeps everything but quiet, when it began and the last alert', () => {
+	fc.assert(
+		fc.property(stored, fc.nat(), (timer, now) => {
+			const left = {
 				quiet: undefined,
+				quietAt: undefined,
 				alertedAt: undefined,
-			}).toEqual({ ...timer, quiet: undefined, alertedAt: undefined })
+			}
+			expect({ ...quietToggled(timer, now), ...left }).toEqual({
+				...timer,
+				...left,
+			})
+		}),
+	)
+})
+
+test('whatever the timer, a tick off a break keeps when quiet began while quiet, and forgets it after', () => {
+	fc.assert(
+		fc.property(full, found, (timer, tick) => {
+			expect(working(timer, tick).quietAt).toBe(
+				tick.quiet ? timer.quietAt : undefined,
+			)
 		}),
 	)
 })

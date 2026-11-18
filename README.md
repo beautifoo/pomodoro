@@ -64,7 +64,7 @@ You never start or stop the timer:
 - Locking the screen starts the time away at once, and holds the alerts; 3 minutes locked is a break. Typing the password doesn't end it.
 - Idle time is this Mac's own: 3 minutes spent on another computer counts as a break, unless you use this Mac's keyboard or trackpad in between (Universal Control included).
 - A closed lid, or a stretch with no session of the agent open, also counts as a break.
-- `/pomodoro quiet`, for a meeting or a demo, keeps the count going with no alert, chime, warning or check-in, and sitting still is never a break. It ends when you run it again, or lock the screen or close the lid for 3 minutes.
+- `/pomodoro quiet`, for a meeting or a demo, keeps the count going with no alert, chime, warning or check-in, and sitting still is never a break. It ends when you run it again, or lock the screen or close the lid for 3 minutes, and by itself after 100 minutes (4 pomodoros), so quiet you forget after a meeting doesn't stay on.
 - The timer is one per person, shared by all your open sessions, so three sessions don't mean three notifications.
 - Claude Code and Pi keep a timer each: with both open, each counts and alerts on its own.
 
