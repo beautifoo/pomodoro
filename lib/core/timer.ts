@@ -3,7 +3,7 @@
 
 // Shared by every open session through the agent's store: one pomodoro per person, not per session. `blockStart` is when
 // the stretch of work since the last break began, `done` the pomodoros of the set before it, `lastInput` the person's
-// own (while quiet, the person is there until a tick sees the screen locked), `agentAt` the main agent's last activity,
+// own (while quiet, the person is there until a tick sees the screen locked),
 // `breakStart` when the break under way began, `quiet` whether /pomodoro quiet is on, since `quietAt` (0.8.0 kept no
 // start). `repo` is the repository the tally credits, that of the ticking session with the latest activity, at
 // `repoAt`; `counted` the pomodoros of this stretch already in the tally.
@@ -13,7 +13,6 @@ export interface Timer {
 	seenAt?: number
 	alertedAt?: number
 	lastInput?: number
-	agentAt?: number
 	breakStart?: number
 	quiet?: boolean
 	quietAt?: number
@@ -25,25 +24,23 @@ export interface Timer {
 // Every field of `T`, each named even when it's undefined.
 type Every<T> = { [K in keyof Required<T>]: T[K] }
 
-// A tick's time, and the person's and the main agent's last presence then.
+// A tick's time, and the person's last input then.
 interface Seen {
 	now: number
 	lastInput: number
-	agentAt: number
 }
 
 // A break, under way or begun at the person's last input. The stretch before it, the set, the last alert, the credit
 // and the tally's count are kept for the return, which may find it was none; quiet isn't.
 export const onBreak = (
 	timer: Timer,
-	{ now, lastInput, agentAt }: Seen,
+	{ now, lastInput }: Seen,
 ): Every<Timer> => ({
 	blockStart: timer.blockStart,
 	done: timer.done,
 	seenAt: now,
 	alertedAt: timer.alertedAt,
 	lastInput,
-	agentAt,
 	breakStart: timer.breakStart ?? lastInput,
 	quiet: undefined,
 	quietAt: undefined,
@@ -65,23 +62,13 @@ interface Working extends Seen {
 // A tick off a break: the break under way, if any, is over, whether the person came back from it or it was none.
 export const working = (
 	timer: Timer,
-	{
-		now,
-		lastInput,
-		agentAt,
-		blockStart,
-		done,
-		alertedAt,
-		quiet,
-		counted,
-	}: Working,
+	{ now, lastInput, blockStart, done, alertedAt, quiet, counted }: Working,
 ): Every<Timer> => ({
 	blockStart,
 	done,
 	seenAt: now,
 	alertedAt,
 	lastInput,
-	agentAt,
 	breakStart: undefined,
 	quiet,
 	quietAt: quiet ? timer.quietAt : undefined,

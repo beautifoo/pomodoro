@@ -480,20 +480,14 @@ test("a turn cut short without the summary logs nothing, and the next turn's isn
 	expect(await endedWithout($, on, 'aborted')).toBe(undefined)
 })
 
-test("a subagent's tool calls don't hold off a break, the main loop's do", async ($, on) => {
+test("the main loop's tool calls don't hold off a break", async ($, on) => {
 	// No input since the start.
 	const { clock, labels } = world(on, (now) => now - T0)
 	await start($)
-	// The main loop's tool calls, one each 30 seconds for 5 minutes: the count runs on.
-	for (let i = 0; i < 10; i++) {
+	// The main loop's tool calls, one each 30 seconds: 3 minutes in, a break.
+	for (let i = 0; i < 7; i++) {
 		await clock.advance(30_000)
 		await checked($)
-	}
-	expect(labels.at(-1)).toBe('🍅 1 of 4 · 5/25m')
-	// A subagent's from then on: 3 minutes after the main loop's last, a break.
-	for (let i = 0; i < 8; i++) {
-		await clock.advance(30_000)
-		await checked($, 'a1')
 	}
 	expect(labels.at(-1)).toBe('🍅 on a break')
 })

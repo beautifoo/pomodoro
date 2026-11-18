@@ -14,7 +14,7 @@ _Avoid_: block, work block, work period
 Four pomodoros, the first after a long break; once the fourth is up, a long break is due.
 
 **Break**:
-3 minutes or more away: with neither input that counts nor activity, with the screen locked, or in a gap. Its length runs from the person's own last input; the next pomodoro starts once the person is back.
+3 minutes or more away: with no input that counts, though the agent may be at work, with the screen locked, or in a gap. Its length runs from the person's own last input; the next pomodoro starts once the person is back.
 
 **Short break**:
 A break of 3 up to 15 minutes, the paper's 3 to 5 and longer; the set carries on.
@@ -38,14 +38,14 @@ Keyboard or mouse input that macOS's idle time shows in 3 of its looks, one ever
 A key, a click, a scroll or a mouse nudge, the person's or a keep-awake app's jiggler, that isn't input that counts: it neither holds off a break nor ends one.
 
 **Activity**:
-The main loop's prompt, reply, or tool call as it starts and as it ends: it holds off a break, so watching the agent work isn't one, but doesn't end one. A subagent's doesn't count. Where there's no system idle time to read (Linux, Windows, SSH), it stands in for input.
+The main loop's prompt, reply, or tool call as it starts and as it ends. Only a prompt the person sends is them being there, as input that counts; the rest neither holds off a break nor ends one, so a break can be taken while the agent works, and watching it work without input for 3 minutes is one too. It picks the repository the tally credits; a subagent's doesn't. Where there's no system idle time to read (Linux, Windows, SSH), the person's prompts are the only input.
 
 **Quiet**:
 What `/pomodoro quiet` turns on, for a meeting or a demo: the count goes on, but nothing asks for a break, and sitting still is never one. A lock or a gap long enough to make a break ends it, and so does the command again; otherwise it ends by itself a set after it began: 4 **Pomodoros** and the 3 short **Breaks** between, 109 minutes.
 _Avoid_: mute, meeting mode, do not disturb
 
 **Shared timer**:
-When the stretch since the last break began and the pomodoros of the set before it, the last tick, the last alert, the person's last input, the main loop's last activity, the break under way, whether it's quiet, and the repository the tally credits, shared by every session of one agent.
+When the stretch since the last break began and the pomodoros of the set before it, the last tick, the last alert, the person's last input, the break under way, whether it's quiet, and the repository the tally credits, shared by every session of one agent.
 
 ### Agents
 

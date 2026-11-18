@@ -60,7 +60,7 @@ In Pi, the count and the break warning share one entry at the foot of the screen
 You never start or stop the timer:
 - 3 minutes with no keyboard or mouse input (macOS idle time) counts as a break, and 15 minutes or more as a long one, which starts a new set. The next pomodoro starts when you're back.
 - Input counts only once it goes on: in 3 of the looks at the idle time, one every 10 seconds, within a minute. So a stray key, a click, or the nudge a keep-awake app's mouse jiggler gives every minute neither holds off a break nor ends one. A prompt you send counts at once.
-- Claude's own work, its replies and its tool calls, counts as you being there, so watching it isn't a break; but it doesn't end one, and a subagent's doesn't count. A break's length runs from your own last input.
+- Claude's own work, its replies and its tool calls, doesn't count as you being there, so you can take a break while it works. Watching it for 3 minutes without touching anything is a break too. A break's length runs from your own last input.
 - Locking the screen starts the time away at once, and holds the alerts; 3 minutes locked is a break. Typing the password doesn't end it.
 - Idle time is this Mac's own: 3 minutes spent on another computer counts as a break, unless you use this Mac's keyboard or trackpad in between (Universal Control included).
 - A closed lid, or a stretch with no session of the agent open, also counts as a break.
@@ -68,7 +68,7 @@ You never start or stop the timer:
 - The timer is one per person, shared by all your open sessions, so three sessions don't mean three notifications.
 - Claude Code and Pi keep a timer each: with both open, each counts and alerts on its own.
 
-On Linux, on Windows, or over SSH, there's no system idle time to read, so it falls back to the agent's activity: 3 minutes with no prompt, reply or tool call of the main agent in any session of that agent counts as a break.
+On Linux, on Windows, or over SSH, there's no system idle time to read, so only your prompts count: 3 minutes with no prompt you send in any session of that agent counts as a break, even while the agent works.
 
 ## Settings
 

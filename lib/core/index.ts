@@ -50,10 +50,10 @@ export function settingsFrom(
 }
 
 // One session's own: the main loop's last activity; its last look at ioreg, and the latest input of each look that saw
-// input in the last minute; the last input that counts (undefined: no look yet); when the person came back from the
-// latest break, by the first look of the run that made input count again; since when the screen is locked, from the
-// first tick that saw it; the check-in now due, the last one sent, and whether the summary it asked for is still to log;
-// the heads-up now due and the last one sent, each by when its pomodoro ends.
+// input in the last minute; the last input that counts (undefined: no look or prompt yet); when the person came back
+// from the latest break, by the first look of the run that made input count again; since when the screen is locked,
+// from the first tick that saw it; the check-in now due, the last one sent, and whether the summary it asked for is
+// still to log; the heads-up now due and the last one sent, each by when its pomodoro ends.
 type State = {
 	lastActivity: number
 	lookedAt?: number
@@ -180,8 +180,8 @@ export type Instance = {
 	stop: () => void
 	// One tick now, as the clock would.
 	tick: () => Promise<void>
-	// A prompt, a reply, or a tool call as it starts or ends; only the main loop's is the person being there. A prompt the
-	// person submitted is their own input too.
+	// A prompt, a reply, or a tool call as it starts or ends; the main loop's picks the repository the tally credits. Only a
+	// prompt the person submitted is them being there: it's their own input.
 	activity: (isMain: boolean, byPerson?: boolean) => Promise<void>
 	// What goes with this tool result, if it's of the main loop: the check-in once a pomodoro is up, with the line that
 	// tells the person, and the heads-up shortly before it ends, for the agent alone. Each once per pomodoro, and none
@@ -224,7 +224,7 @@ export function createInstance(
 	const isTickBehind = (now: number) =>
 		cancelClock !== undefined && !isStopped && now - lastTickAt >= SHORT_BREAK
 
-	// Where ioreg gives nothing (not macOS) there's no look, and the session's activity stands in. After a sleep the tick,
+	// Where ioreg gives nothing (not macOS) there's no look, and the person's prompts stand in. After a sleep the tick,
 	// which takes its own look, finds the break from the input before it, before looks of the input after it can count.
 	async function look() {
 		const now = await host.now()
@@ -346,7 +346,7 @@ export function createInstance(
 			const now = await host.now()
 			// After a sleep the tick comes first, so a check-in due before it isn't sent.
 			if (isTickBehind(now)) await runTick().catch(() => {})
-			// A subagent's work isn't the person being there.
+			// A subagent's work doesn't pick the repository the tally credits.
 			if (isMain) state = active(state, now, byPerson)
 		},
 		async toolResult(isMain) {
@@ -411,12 +411,10 @@ const tomato = (settings: Settings, word = '') =>
 	settings.emoji ? '🍅 ' : word
 
 // The main loop's prompt, reply, or tool call as it starts or ends; the person's own for a prompt, which counts at once
-// as input. Without the looks, the activity stands in for input already.
+// as input, with the looks or without.
 function active(state: State, now: number, byPerson: boolean): State {
 	const next = { ...state, lastActivity: now }
-	return byPerson && state.lastInputThatCounts !== undefined
-		? inputCounts(next, now, now, now)
-		: next
+	return byPerson ? inputCounts(next, now, now, now) : next
 }
 
 // A look puts the latest input `idleMs` before `now`, and saw input when that's after the look before. Exported, as
@@ -494,27 +492,22 @@ export function tick(
 		SET * POMODORO +
 		(SET - 1) * SHORT_BREAK
 	const isQuiet = timer.quiet === true && !isGap && now < quietUntil
-	// The person's last input that counts, from the looks at ioreg, and the main agent's last activity; without the
-	// looks, both are the activity. Each is the latest any session has seen, so an idle session can't end the pomodoro
-	// another one is working in. While quiet the person is there until the screen locks: sitting still in a call is no
-	// break, however long, and only a lock held for a break's length is one.
+	// The person's last input that counts, from the looks at ioreg and the prompts they send; without the looks, the
+	// prompts alone. The latest any session has seen, so an idle session can't end the pomodoro another one is working
+	// in. The agent's own work isn't the person there: a break may be under way while it runs. While quiet the person is
+	// there until the screen locks: sitting still in a call is no break, however long, and only a lock held for a
+	// break's length is one.
 	const lastInput = Math.max(
 		timer.lastInput ?? 0,
-		state.lastInputThatCounts ?? state.lastActivity,
+		state.lastInputThatCounts ?? 0,
 		isQuiet ? (lockedSince ?? now) : 0,
 	)
-	const agentAt = Math.max(timer.agentAt ?? 0, state.lastActivity)
-	// Time since the person or the main agent was last there. Watching the agent holds off a break but doesn't end one:
-	// only the person's own input does. A lock starts the time away at once.
+	// Time since the person was last there. A lock starts the time away at once.
 	const idle =
-		now -
-		Math.min(
-			timer.breakStart === undefined ? Math.max(lastInput, agentAt) : lastInput,
-			lockedSince ?? Number.POSITIVE_INFINITY,
-		)
+		now - Math.min(lastInput, lockedSince ?? Number.POSITIVE_INFINITY)
 
-	// The break began at the person's own last input, not the agent's. It forgets the last return: the look that counts
-	// the next one sets it again, and where another session's input ends this break first, there's none to read.
+	// The break began at the person's last input. It forgets the last return: the look that counts the next one sets it
+	// again, and where another session's input ends this break first, there's none to read.
 	const { repo = null } = timer
 	let inTally = timer.counted ?? 0
 	if (idle >= SHORT_BREAK)
@@ -528,7 +521,7 @@ export function tick(
 			effects: [
 				{
 					type: 'persist',
-					timer: onBreak(timer, { now, lastInput, agentAt }),
+					timer: onBreak(timer, { now, lastInput }),
 				},
 				{
 					type: 'show',
@@ -559,13 +552,13 @@ export function tick(
 		// break the person came back from just before. Then the stretch goes on, as if none was found.
 		if (backAt - leftAt >= SHORT_BREAK) {
 			// The pomodoro up before the break counts, one cut short doesn't; a long break starts a new set. A break that
-			// began before any activity (at 0, off macOS) began long ago.
+			// began before any input of the person (at 0: no look or prompt yet) began long ago.
 			away = backAt - leftAt
 			const runMs = Math.max(0, leftAt - blockStart)
 			const upBefore = runMs >= POMODORO ? 1 : 0
 			done = away >= LONG_BREAK ? 0 : done + upBefore
 			// Into the tally: the pomodoro if no tick saw it up (the lid closed right after it), and the break, unless it
-			// began before any activity, which has no length to tell. None of the new stretch's is in yet.
+			// began before any input, which has no length to tell. None of the new stretch's is in yet.
 			entries.push(...pomodoros(blockStart, inTally, upBefore, repo))
 			if (leftAt !== 0)
 				entries.push({ at: backAt, repo, kind: 'break', ms: away, runMs })
@@ -600,7 +593,6 @@ export function tick(
 			timer: working(timer, {
 				now,
 				lastInput,
-				agentAt,
 				blockStart,
 				done,
 				alertedAt: shouldAlert ? now : alertedAt,
@@ -617,7 +609,7 @@ export function tick(
 		},
 	)
 	// Back, once: this tick stores the timer without the break, so another session's has none to end. In whole minutes, as
-	// the count's; not from a break that began before any activity, which has no length to tell, nor from one that began
+	// the count's; not from a break that began before any input, which has no length to tell, nor from one that began
 	// on an earlier day (the night, as the tally takes it), where coming back is just starting the day.
 	if (
 		away !== undefined &&

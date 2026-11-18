@@ -381,14 +381,17 @@ test('stop cancels the clock, the looks and the wake, and no tick runs after it'
 	expect(early.pending()).toBe(0)
 })
 
-test('over SSH ioreg never runs: activity stands in, and 3 minutes without it is a break, 2 is not', async () => {
+test("over SSH ioreg never runs: the person's prompts stand in, and 3 minutes without one is a break, 2 is not, while the main agent works too", async () => {
 	const w = world()
 	const pomodoro = start(w, {}, { remote: true })
 	await w.settle()
-	await pomodoro.activity(true)
-	await w.advance(3 * MINUTE)
+	await pomodoro.activity(true, true)
+	for (let i = 0; i < 6; i++) {
+		await w.advance(30_000)
+		await pomodoro.activity(true)
+	}
 	expect(w.runs).toEqual([])
-	// No activity before the first tick: nothing to say the person was there, nor how long they were away.
+	// No prompt before the first tick: nothing to say the person was there, nor how long they were away.
 	expect(w.shows.map((show) => show.label)).toEqual([
 		'🍅 on a break',
 		'🍅 1 of 4 · 1/25m',
@@ -1207,12 +1210,12 @@ test('without ioreg, a break is a break from every session', async () => {
 	expect(w.label()).toBe('🍅 1 of 4 · 20/25m')
 
 	for (let i = 0; i < 5; i++) {
-		await pomodoro.activity(true)
+		await pomodoro.activity(true, true)
 		await w.advance(MINUTE)
 	}
 	expect(w.notified.length).toBe(1)
 
-	// 2 minutes without activity is no break, 3 are.
+	// 2 minutes without a prompt is no break, 3 are.
 	await w.advance(MINUTE)
 	expect(w.label()).toBe('🍅 1 of 4 · 25/25m')
 	await w.advance(MINUTE)
@@ -1298,45 +1301,67 @@ test("a tool result right after waking doesn't send the check-in due before the 
 	expect(await pomodoro.toolResult(true)).toEqual({})
 })
 
-test('watching the main agent work is no break', async () => {
-	const w = world({ idle: inputs(steady(T0, T0 + 10 * MINUTE)) })
+test('a break taken while the main agent works counts, though the agent is still at it', async () => {
+	// In use to 10 minutes in, away while the main agent works to 20, and back at 15.
+	const w = world({
+		idle: inputs([
+			...steady(T0, T0 + 10 * MINUTE),
+			...steady(T0 + 15 * MINUTE, T0 + 17 * MINUTE),
+		]),
+	})
 	const pomodoro = start(w)
-	for (let at = T0 + 12 * MINUTE; at <= T0 + 30 * MINUTE; at += 2 * MINUTE) {
+	for (let at = T0 + 10 * MINUTE; at <= T0 + 20 * MINUTE; at += 30_000) {
 		await w.set(at)
 		await pomodoro.activity(true)
 	}
-	expect(w.shows.map((show) => show.label)).not.toContain('🍅 on a break')
-	expect(w.label()).toBe('🍅 1 of 4 · 25/25m')
-	expect(w.notified[0]).toStartWith('🍅 25 minutes without a break.')
+	expect(w.toasts).toEqual(['🍅 Back after 5m · pomodoro 1 of 4'])
 })
 
-test("a subagent's work is no presence", async () => {
+test("a subagent's work doesn't take the repository the tally credits", async () => {
+	// In use in app for 30 minutes, while a subagent works in web.
+	const w = worldAt(NINE, { idle: inputs(steady(nine(0), nine(30))) })
+	const app = start(w)
+	const web = createInstance(
+		{ ...w.host, repo: async () => '/code/web' },
+		{ settings: DEFAULTS, remote: false, language: 'en' },
+	)
+	web.start()
+	await w.settle()
+	await app.activity(true)
+	await w.set(nine(10))
+	await web.activity(false)
+	await w.set(nine(30))
+	expect(await web.command('today')).toBe('Today: no pomodoros yet.')
+})
+
+test("over SSH the main agent's work alone never ends a break", async () => {
+	const w = world()
+	const pomodoro = start(w, {}, { remote: true })
+	for (let i = 0; i < 6; i++) {
+		await w.advance(30_000)
+		await pomodoro.activity(true)
+	}
+	expect(w.label()).toBe('🍅 on a break')
+})
+
+test('3 minutes without input from the person is a break, while the main agent works too', async () => {
 	const w = world({ idle: inputs(steady(T0, T0 + 10 * MINUTE)) })
 	const pomodoro = start(w)
 	for (
 		let at = T0 + 10 * MINUTE;
-		at <= T0 + 13 * MINUTE + 30_000;
-		at += 30_000
+		at <= T0 + 12 * MINUTE + 59_000;
+		at += 59_000
 	) {
 		await w.set(at)
-		await pomodoro.activity(false)
+		await pomodoro.activity(true)
 	}
-	expect(w.label()).toBe('🍅 on a break')
-})
-
-test('3 minutes with nothing from the person or the main agent is a break, mid-turn too', async () => {
-	const w = world({ idle: inputs(steady(T0, T0 + 10 * MINUTE)) })
-	const pomodoro = start(w)
-	await w.set(T0 + 12 * MINUTE)
-	await pomodoro.activity(true)
-	await w.set(T0 + 14 * MINUTE + 59_000)
-	expect(w.label()).toBe('🍅 1 of 4 · 14/25m')
-	await w.set(T0 + 15 * MINUTE + 30_000)
+	expect(w.label()).toBe('🍅 1 of 4 · 12/25m')
+	await w.set(T0 + 13 * MINUTE + 5_000)
 	expect(w.label()).toBe('🍅 on a break')
 })
 
 test("a break's length counts from the person's own last input", async () => {
-	// In use to 10 minutes in, watching the main agent to 20, and back at 32: 22 minutes away.
+	// In use to 10 minutes in, away while the main agent works to 20, and back at 32: 22 minutes away.
 	const w = world({
 		idle: inputs([
 			...steady(T0, T0 + 10 * MINUTE),
@@ -1348,8 +1373,6 @@ test("a break's length counts from the person's own last input", async () => {
 		await w.set(at)
 		await pomodoro.activity(true)
 	}
-	await w.set(T0 + 22 * MINUTE + 59_000)
-	expect(w.label()).toBe('🍅 1 of 4 · 22/25m')
 	await w.set(T0 + 32 * MINUTE)
 	expect(w.label()).toBe('🍅 on a break')
 	expect((w.store.timer as Timer).breakStart).toBe(T0 + 10 * MINUTE)

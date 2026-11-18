@@ -18,7 +18,8 @@ Single-context repo:
 ├── GLOSSARY.md
 ├── docs/adr/
 │   ├── 0001-core-carries-out-its-effects-through-a-host.md
-│   └── 0002-the-papers-rhythm-without-timing-settings.md
+│   ├── 0002-the-papers-rhythm-without-timing-settings.md
+│   └── 0003-the-persons-input-alone-as-presence.md
 ├── lib/core/
 └── packages/
     ├── claude/

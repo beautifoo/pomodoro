@@ -12,7 +12,6 @@ const fields = {
 	seenAt: fc.nat(),
 	alertedAt: fc.nat(),
 	lastInput: fc.nat(),
-	agentAt: fc.nat(),
 	breakStart: fc.nat(),
 	quiet: fc.boolean(),
 	quietAt: fc.nat(),
@@ -23,8 +22,8 @@ const fields = {
 // A timer as any version may have stored it, with some of its fields or none; and one with all of them.
 const stored = fc.record(fields, { requiredKeys: [] })
 const full = fc.record(fields)
-// A tick's time and the person's and the main agent's last presence then; off a break, with what the tick found.
-const presence = { now: fc.nat(), lastInput: fc.nat(), agentAt: fc.nat() }
+// A tick's time and the person's last input then; off a break, with what the tick found.
+const presence = { now: fc.nat(), lastInput: fc.nat() }
 const seen = fc.record(presence)
 const found = fc.record({
 	...presence,
@@ -36,7 +35,6 @@ const found = fc.record({
 })
 // The timer's fields, in order.
 const FIELDS = [
-	'agentAt',
 	'alertedAt',
 	'blockStart',
 	'breakStart',
@@ -56,22 +54,18 @@ test('a break ends quiet', () => {
 		{
 			now: T0 + 24 * MINUTE,
 			lastInput: T0 + 21 * MINUTE,
-			agentAt: T0 + 21 * MINUTE,
 		},
 	)
 	expect(timer.quiet).toBeUndefined()
 })
 
 test("a first break, with nothing stored, begins at the person's last input and credits no repository", () => {
-	expect(
-		onBreak({}, { now: T0 + 4 * MINUTE, lastInput: T0, agentAt: T0 + MINUTE }),
-	).toEqual({
+	expect(onBreak({}, { now: T0 + 4 * MINUTE, lastInput: T0 })).toEqual({
 		blockStart: undefined,
 		done: undefined,
 		seenAt: T0 + 4 * MINUTE,
 		alertedAt: undefined,
 		lastInput: T0,
-		agentAt: T0 + MINUTE,
 		breakStart: T0,
 		quiet: undefined,
 		quietAt: undefined,
@@ -119,7 +113,7 @@ test('a break already under way keeps its start, whatever the tick', () => {
 test('a break writes exactly the timer, less any field an older version left', () => {
 	fc.assert(
 		fc.property(stored, seen, (timer, tick) => {
-			const older = { ...timer, checkInAt: T0 }
+			const older = { ...timer, checkInAt: T0, agentAt: T0 }
 			expect(Object.keys(onBreak(older, tick)).sort()).toEqual(FIELDS)
 		}),
 	)
@@ -131,7 +125,6 @@ test('coming back from a break clears it', () => {
 		{
 			now: T0 + 30 * MINUTE,
 			lastInput: T0 + 30 * MINUTE,
-			agentAt: T0 + 21 * MINUTE,
 			blockStart: T0 + 29 * MINUTE,
 			done: 0,
 			alertedAt: 0,
@@ -165,7 +158,7 @@ test('whatever the timer, a tick off a break keeps the credit', () => {
 test('a tick off a break writes exactly the timer, less any field an older version left', () => {
 	fc.assert(
 		fc.property(stored, found, (timer, tick) => {
-			const older = { ...timer, checkInAt: T0 }
+			const older = { ...timer, checkInAt: T0, agentAt: T0 }
 			expect(Object.keys(working(older, tick)).sort()).toEqual(FIELDS)
 		}),
 	)
