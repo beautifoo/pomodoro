@@ -80,7 +80,7 @@ const en: Messages = {
 		`Back after ${away(minutes, 'm', 'h')} · new set, pomodoro 1 of 4`,
 	quiet: 'quiet',
 	quietOn:
-		'Quiet is on: no alerts or check-ins for 100 minutes, or until you run /pomodoro quiet again, or lock the screen or close the lid for 3 minutes. The count goes on.',
+		'Quiet is on: no alerts or check-ins for 109 minutes, or until you run /pomodoro quiet again, or lock the screen or close the lid for 3 minutes. The count goes on.',
 	quietOff: 'Quiet is off.',
 	notice: 'Pomodoro: told the agent your pomodoro is up.',
 	settings: {
@@ -123,7 +123,7 @@ const it: Messages = {
 		`Di ritorno dopo ${away(minutes, ' min', ' ore')} · nuova serie, pomodoro 1 di 4`,
 	quiet: 'silenzio',
 	quietOn:
-		'Silenzio attivo: niente avvisi né check-in per 100 minuti, o finché non esegui di nuovo /pomodoro quiet, o blocchi lo schermo o chiudi il portatile per 3 minuti. Il conteggio continua.',
+		'Silenzio attivo: niente avvisi né check-in per 109 minuti, o finché non esegui di nuovo /pomodoro quiet, o blocchi lo schermo o chiudi il portatile per 3 minuti. Il conteggio continua.',
 	quietOff: 'Silenzio disattivato.',
 	notice: "Pomodoro: ho detto all'agente che il tuo pomodoro è finito.",
 	settings: {
@@ -167,7 +167,7 @@ const de: Messages = {
 		`Zurück nach ${away(minutes, ' min', ' Stunden')} · neue Runde, Pomodoro 1 von 4`,
 	quiet: 'stumm',
 	quietOn:
-		'Stumm geschaltet: keine Benachrichtigungen oder Check-ins für 100 Minuten, oder bis du /pomodoro quiet erneut ausführst oder 3 Minuten lang den Bildschirm sperrst oder den Laptop zuklappst. Die Zählung läuft weiter.',
+		'Stumm geschaltet: keine Benachrichtigungen oder Check-ins für 109 Minuten, oder bis du /pomodoro quiet erneut ausführst oder 3 Minuten lang den Bildschirm sperrst oder den Laptop zuklappst. Die Zählung läuft weiter.',
 	quietOff: 'Stummschaltung aus.',
 	notice: 'Pomodoro: Der Agent weiß jetzt, dass dein Pomodoro um ist.',
 	settings: {
@@ -211,7 +211,7 @@ const fr: Messages = {
 		`Absence de ${away(minutes, ' min', ' h')} · nouvelle série, pomodoro 1 sur 4`,
 	quiet: 'silencieux',
 	quietOn:
-		"Mode silencieux activé : aucune alerte ni check-in pendant 100 minutes, ou jusqu'à ce que vous relanciez /pomodoro quiet, ou que vous verrouilliez l'écran ou fermiez le portable pendant 3 minutes. Le comptage continue.",
+		"Mode silencieux activé : aucune alerte ni check-in pendant 109 minutes, ou jusqu'à ce que vous relanciez /pomodoro quiet, ou que vous verrouilliez l'écran ou fermiez le portable pendant 3 minutes. Le comptage continue.",
 	quietOff: 'Mode silencieux désactivé.',
 	notice: "Pomodoro : l'agent sait que votre pomodoro est terminé.",
 	settings: {
@@ -255,7 +255,7 @@ const es: Messages = {
 		`De vuelta tras ${away(minutes, ' min', ' h')} · nueva serie, pomodoro 1 de 4`,
 	quiet: 'silencio',
 	quietOn:
-		'Modo silencio activado: sin alertas ni check-ins durante 100 minutos, o hasta que vuelvas a ejecutar /pomodoro quiet, o bloquees la pantalla o cierres la tapa durante 3 minutos. El conteo sigue.',
+		'Modo silencio activado: sin alertas ni check-ins durante 109 minutos, o hasta que vuelvas a ejecutar /pomodoro quiet, o bloquees la pantalla o cierres la tapa durante 3 minutos. El conteo sigue.',
 	quietOff: 'Modo silencio desactivado.',
 	notice: 'Pomodoro: el agente sabe que tu pomodoro terminó.',
 	settings: {
@@ -301,7 +301,7 @@ const pt: Messages = {
 		`De volta após ${away(minutes, ' min', ' h')} · nova série, pomodoro 1 de 4`,
 	quiet: 'silêncio',
 	quietOn:
-		'Modo silêncio ativado: sem alertas nem check-ins por 100 minutos, ou até você executar /pomodoro quiet de novo, ou bloquear a tela ou fechar a tampa por 3 minutos. A contagem continua.',
+		'Modo silêncio ativado: sem alertas nem check-ins por 109 minutos, ou até você executar /pomodoro quiet de novo, ou bloquear a tela ou fechar a tampa por 3 minutos. A contagem continua.',
 	quietOff: 'Modo silêncio desativado.',
 	notice: 'Pomodoro: o agente sabe que seu pomodoro terminou.',
 	settings: {
@@ -354,7 +354,7 @@ const ru: Messages = {
 		`Вы вернулись через ${away(minutes, ' мин', ' ч')} · новая серия, помидор 1 из 4`,
 	quiet: 'тихо',
 	quietOn:
-		'Тихий режим включён: никаких уведомлений и сводок 100 минут или пока вы снова не выполните /pomodoro quiet, не заблокируете экран или не закроете крышку ноутбука на 3 минуты. Счёт продолжается.',
+		'Тихий режим включён: никаких уведомлений и сводок 109 минут или пока вы снова не выполните /pomodoro quiet, не заблокируете экран или не закроете крышку ноутбука на 3 минуты. Счёт продолжается.',
 	quietOff: 'Тихий режим выключен.',
 	notice: 'Pomodoro: агент знает, что ваш помидор закончился.',
 	settings: {
@@ -398,7 +398,7 @@ const zh: Messages = {
 		`回来了，离开了${away(minutes, '分钟', '小时')} · 新一轮，番茄钟 1/4`,
 	quiet: '静音',
 	quietOn:
-		'静音已开启：100分钟内不提醒，也不做小结，除非你再次运行 /pomodoro quiet，或锁屏、合上笔记本满3分钟。计时照常进行。',
+		'静音已开启：109分钟内不提醒，也不做小结，除非你再次运行 /pomodoro quiet，或锁屏、合上笔记本满3分钟。计时照常进行。',
 	quietOff: '静音已关闭。',
 	notice: 'Pomodoro：已告知智能体，你的番茄钟时间到了。',
 	settings: {

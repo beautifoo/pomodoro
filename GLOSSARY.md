@@ -41,7 +41,7 @@ A key, a click, a scroll or a mouse nudge, the person's or a keep-awake app's ji
 The main loop's prompt, reply, or tool call as it starts and as it ends: it holds off a break, so watching the agent work isn't one, but doesn't end one. A subagent's doesn't count. Where there's no system idle time to read (Linux, Windows, SSH), it stands in for input.
 
 **Quiet**:
-What `/pomodoro quiet` turns on, for a meeting or a demo: the count goes on, but nothing asks for a break, and sitting still is never one. A lock or a gap long enough to make a break ends it, and so does the command again; otherwise it ends by itself 4 **Pomodoros** (100 minutes) after it began.
+What `/pomodoro quiet` turns on, for a meeting or a demo: the count goes on, but nothing asks for a break, and sitting still is never one. A lock or a gap long enough to make a break ends it, and so does the command again; otherwise it ends by itself a set after it began: 4 **Pomodoros** and the 3 short **Breaks** between, 109 minutes.
 _Avoid_: mute, meeting mode, do not disturb
 
 **Shared timer**:

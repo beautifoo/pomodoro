@@ -866,7 +866,7 @@ test('/pomodoro with anything else gives the usage', async () => {
 })
 
 const QUIET_ON =
-	'Quiet is on: no alerts or check-ins for 100 minutes, or until you run /pomodoro quiet again, or lock the screen or close the lid for 3 minutes. The count goes on.'
+	'Quiet is on: no alerts or check-ins for 109 minutes, or until you run /pomodoro quiet again, or lock the screen or close the lid for 3 minutes. The count goes on.'
 const QUIET_OFF = 'Quiet is off.'
 
 test('quiet keeps counting with no alert or check-in, and the alert comes as soon as it ends', async () => {
@@ -993,13 +993,13 @@ test('a lid closed for 2 minutes 30 seconds is no break, and quiet stays on', as
 		}
 })
 
-// Quiet forgotten after a meeting: on 20 minutes in, it lasts 4 pomodoros from then, past the stretch's 100 minutes.
-test('quiet lasts 100 minutes from when it was turned on', async () => {
+// Quiet forgotten after a meeting: on 20 minutes in, it lasts a set from then, 4 pomodoros and the 3 short breaks between.
+test('quiet lasts 109 minutes from when it was turned on', async () => {
 	const w = world()
 	const pomodoro = start(w)
 	await w.set(T0 + 20 * MINUTE)
 	await pomodoro.command('quiet')
-	await w.set(T0 + 119 * MINUTE)
+	await w.set(T0 + 128 * MINUTE)
 	expect(w.label()).toBe('🍅 quiet · 1 of 4 · 25/25m')
 })
 
@@ -1008,17 +1008,28 @@ test('then quiet ends by itself, and the alert comes at once', async () => {
 	const pomodoro = start(w)
 	await w.set(T0 + 20 * MINUTE)
 	await pomodoro.command('quiet')
-	await w.set(T0 + 120 * MINUTE)
+	await w.set(T0 + 129 * MINUTE)
 	expect(w.notified).toEqual([
-		'🍅 120 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
+		'🍅 129 minutes without a break. Stand up and look away from the screen for 3 to 5 minutes.',
 	])
 })
 
 // 0.8.0 kept no start: such quiet counts from the stretch's.
-test('quiet stored by 0.8.0 ends 100 minutes into the stretch', async () => {
+test('quiet stored by 0.8.0 lasts until 109 minutes into the stretch', async () => {
 	const w = world({
 		seed: {
-			timer: { blockStart: T0 - 100 * MINUTE, seenAt: T0, quiet: true },
+			timer: { blockStart: T0 - 108 * MINUTE, seenAt: T0, quiet: true },
+		},
+	})
+	start(w)
+	await w.settle()
+	expect(w.label()).toBe('🍅 quiet · 1 of 4 · 25/25m')
+})
+
+test('quiet stored by 0.8.0 ends 109 minutes into the stretch', async () => {
+	const w = world({
+		seed: {
+			timer: { blockStart: T0 - 109 * MINUTE, seenAt: T0, quiet: true },
 		},
 	})
 	start(w)

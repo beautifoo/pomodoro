@@ -487,9 +487,12 @@ export function tick(
 	const isGap =
 		timer.seenAt === undefined ||
 		now - Math.max(timer.seenAt, awakeAt) >= SHORT_BREAK
-	// Quiet lasts 4 pomodoros from when it began, so one forgotten after a meeting ends by itself; 0.8.0 kept no start,
-	// so its quiet counts from the stretch's.
-	const quietUntil = (timer.quietAt ?? timer.blockStart ?? now) + SET * POMODORO
+	// Quiet lasts a set from when it began, 4 pomodoros and the 3 short breaks between, so one forgotten after a meeting
+	// ends by itself; 0.8.0 kept no start, so its quiet counts from the stretch's.
+	const quietUntil =
+		(timer.quietAt ?? timer.blockStart ?? now) +
+		SET * POMODORO +
+		(SET - 1) * SHORT_BREAK
 	const isQuiet = timer.quiet === true && !isGap && now < quietUntil
 	// The person's last input that counts, from the looks at ioreg, and the main agent's last activity; without the
 	// looks, both are the activity. Each is the latest any session has seen, so an idle session can't end the pomodoro
